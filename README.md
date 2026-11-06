@@ -22,6 +22,12 @@
 
 微信公众号与微信视频号使用不同的账号入口。Bilibili 尚未启用，也没有把图片笔记列为文章发布能力。平台原生的审核、短信、扫码、验证码及实名验证需要使用者在打开的浏览器中完成。
 
+## 安装测试构建
+
+在成功的 [Actions 构建](https://github.com/ecojust/easy-publish/actions/workflows/build.yml) 页面底部下载对应的 artifact，并解压 ZIP：Apple Silicon 选择 `macOS-arm64`，Intel Mac 选择 `macOS-x64`，Windows 选择 `Windows-x64`。macOS 打开其中的 DMG，将应用拖入“应用程序”；Windows 运行其中的 `-setup.exe`。Actions 下载通常需要登录 GitHub。
+
+当前构建尚未配置 Apple 公证或 Windows 商业代码签名。macOS 首次打开如果提示无法验证开发者，可在“系统设置 → 隐私与安全性”中允许打开这份自行确认来源的构建。无需关闭系统的整体安全保护。Windows 安装器在缺少 WebView2 时会下载其运行环境，需要网络；发布浏览器可在应用的设置中准备。
+
 ## 使用流程
 
 1. 打开“设置”，查看发布浏览器和本机凭据库状态。应用会先查找已安装的 Chrome / Edge / Chromium；没有可用浏览器时，点击“下载并准备浏览器”。下载需要网络，公众号官方 API 操作本身不依赖浏览器。

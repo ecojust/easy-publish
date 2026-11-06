@@ -26,8 +26,11 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build
-      - run: npx playwright install --with-deps chromium
+      - name: Check runner browser
+        run: /usr/bin/google-chrome --version
       - run: npm run test:ui
+        env:
+          EASY_PUBLISH_CHROMIUM: /usr/bin/google-chrome
       - name: Upload interface test evidence
         if: always()
         uses: actions/upload-artifact@v4

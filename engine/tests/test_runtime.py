@@ -162,6 +162,54 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.runtime._jobs, {})
         self.assertEqual(list((self.root / "work").iterdir()), [])
 
+    async def _assert_browser_temp_profile_cleanup(self, cancel: bool):
+        """A browser-like child uses its default temp root, not an explicit dir."""
+        created = asyncio.Event()
+        profiles = []
+        self.payload["options"]["wait_for_cancel"] = cancel
+        script = """
+import json,pathlib,subprocess,sys,time
+request=json.loads(sys.stdin.readline())
+child = '''
+import os,pathlib,sys,tempfile
+workspace=pathlib.Path(sys.argv[1]).resolve()
+assert all(pathlib.Path(os.environ[key]).resolve()==workspace for key in ('TMPDIR','TEMP','TMP'))
+profile=pathlib.Path(tempfile.mkdtemp(prefix='browser-profile-'))
+assert profile.parent.resolve()==workspace
+(profile/'Cookies').write_text('fixture-browser-cookie')
+print(str(profile),flush=True)
+'''
+profile=subprocess.check_output([sys.executable,'-c',child,request['workspace']],text=True).strip()
+print(json.dumps({'event':'progress','message':profile}),flush=True)
+if request['payload']['options']['wait_for_cancel']:
+    time.sleep(60)
+print(json.dumps({'event':'result','status':'ready','message':'fixture complete'}),flush=True)
+"""
+
+        async def on_event(event):
+            profile = Path(event["message"])
+            self.assertTrue(profile.is_relative_to(self.root / "work"))
+            self.assertEqual((profile / "Cookies").read_text(), "fixture-browser-cookie")
+            profiles.append(profile)
+            created.set()
+
+        with self.command(script):
+            task = asyncio.create_task(self.runtime.run("check", self.payload, on_event, "browser-temp"))
+            await asyncio.wait_for(created.wait(), 3)
+            if cancel:
+                await self.runtime.cancel("browser-temp")
+            result = await asyncio.wait_for(task, 3)
+        self.assertEqual(result["status"], "failed" if cancel else "ready")
+        self.assertEqual(len(profiles), 1)
+        self.assertFalse(profiles[0].exists())
+        self.assertFalse(profiles[0].parent.exists())
+
+    async def test_browser_temp_profile_removed_after_completion(self):
+        await self._assert_browser_temp_profile_cleanup(cancel=False)
+
+    async def test_browser_temp_profile_removed_after_forced_cancellation(self):
+        await self._assert_browser_temp_profile_cleanup(cancel=True)
+
     async def test_cancel_method_kills_worker_child_process(self):
         entered = asyncio.Event()
 

@@ -217,6 +217,11 @@ class Runtime:
             environment["PLAYWRIGHT_BROWSERS_PATH"] = str(self.browser_root)
             environment["PYTHONUNBUFFERED"] = "1"
             environment["PYTHONIOENCODING"] = "utf-8"
+            # Patchright/Chromium create profiles and downloads in the process
+            # temp directory. Keep those plaintext files inside the same owned
+            # workspace so cancellation and crash recovery remove them too.
+            for variable in ("TMPDIR", "TEMP", "TMP"):
+                environment[variable] = str(workspace)
             process = await asyncio.create_subprocess_exec(*self._worker_command(), stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL, env=environment, **_process_options())
             self._jobs[job_id] = process
             request = {"operation": operation, "payload": request_payload, "workspace": str(workspace), "session_path": str(session), "browser_path": self.browser_path, "parent_pid": os.getpid(), "worker_group_id": process.pid if os.name != "nt" else None}
