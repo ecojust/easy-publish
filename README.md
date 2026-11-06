@@ -4,7 +4,7 @@
 
 面向 **macOS 13.5+（Apple Silicon / Intel）和 Windows 10+ x64**。桌面使用 Tauri 2 和系统 WebView，发布引擎随安装包提供，普通用户无需安装 Python、Node.js 或开发工具。macOS 最低版本由内置 Patchright 的 Node 24 驱动要求决定，来源见[桌面说明](docs/desktop.md)。
 
-当前是 `0.1.3` 开发版本。已实现的平台适配使用隔离的页面与 HTTP fixture 验证，**尚未完成真实账号登录及发布验收**；网站改版、账号权限和人工验证都可能影响实际操作。安装包工作流已配置，产物是否可下载以实际成功的 [Actions 运行](https://github.com/ecojust/easy-publish/actions/workflows/build.yml) 为准；本阶段尚未发布 Release。
+当前版本为 `0.1.3`，安装包见 [GitHub Release](https://github.com/ecojust/easy-publish/releases/tag/v0.1.3)。已实现的平台适配使用隔离的页面与 HTTP fixture 验证，**尚未完成真实账号登录及发布验收**；网站改版、账号权限和人工验证都可能影响实际操作。
 
 ## 平台能力
 
@@ -24,9 +24,17 @@
 
 微信公众号与微信视频号使用不同的账号入口。图片笔记不属于当前文章发布能力。平台原生的审核、短信、扫码、验证码及实名验证需要使用者在打开的浏览器中完成。
 
-## 安装测试构建
+## 安装与下载
 
-在成功的 [Actions 构建](https://github.com/ecojust/easy-publish/actions/workflows/build.yml) 页面底部下载对应的 artifact，并解压 ZIP：Apple Silicon 选择 `macOS-arm64`，Intel Mac 选择 `macOS-x64`，Windows 选择 `Windows-x64`。macOS 打开其中的 DMG，将应用拖入“应用程序”；Windows 运行其中的 `-setup.exe`。Actions 下载通常需要登录 GitHub。
+从 [Release 页面](https://github.com/ecojust/easy-publish/releases/tag/v0.1.3) 下载对应安装包：
+
+| 系统 | 下载 |
+| --- | --- |
+| macOS Apple Silicon（M1–M5） | [ARM DMG](https://github.com/ecojust/easy-publish/releases/download/v0.1.3/Easy-Publish_0.1.3_macos-arm64.dmg) |
+| macOS Intel | [Intel DMG](https://github.com/ecojust/easy-publish/releases/download/v0.1.3/Easy-Publish_0.1.3_macos-x64.dmg) |
+| Windows x64 | [安装程序](https://github.com/ecojust/easy-publish/releases/download/v0.1.3/Easy-Publish_0.1.3_windows-x64-setup.exe) |
+
+升级前完全退出旧版。macOS 打开 DMG，将应用拖入“应用程序”；Windows 运行安装程序。Release 同时提供 `SHA256SUMS.txt`。后续开发构建仍可从成功的 [Actions 运行](https://github.com/ecojust/easy-publish/actions/workflows/build.yml) 下载 artifact 并解压 ZIP，Actions 下载通常需要登录 GitHub。
 
 macOS 请使用 0.1.1 或之后的构建。0.1.0 在部分 Mac 上会因启动程序与内置 Python 库的签名身份冲突而立即退出；0.1.1 修正了 ad-hoc 签名配置。替换应用前请完全退出旧版本，包括启动错误弹窗。
 
@@ -166,7 +174,7 @@ npm run tauri -- build
 
 PyInstaller 不交叉编译：Apple Silicon、Intel Mac 和 Windows 各自生成对应引擎。冻结后的引擎可用 `scripts/smoke-engine.py` 单独检查，准确文件名、目标参数和安装包说明见 [桌面开发与构建](docs/desktop.md)。
 
-[构建工作流](.github/workflows/build.yml) 分别构建三种目标，执行检查后上传 DMG / Windows NSIS 安装包为 Actions artifact，不自动创建 Release。当前 macOS 配置为 ad-hoc 完整性签名，尚无 Developer ID 签名或 Apple 公证；Windows 也未配置商业代码签名。构建、启动检查和 fixture 通过均不等于真实平台发布验收。
+[构建工作流](.github/workflows/build.yml) 分别构建三种目标，执行检查后上传 DMG / Windows NSIS 安装包为 Actions artifact。[手动发布工作流](.github/workflows/release.yml) 核对 tag、成功构建及应用源码一致性，验证 artifact ZIP 摘要，再将原始安装包与 SHA-256 清单发布到 Release。当前 macOS 配置为 ad-hoc 完整性签名，尚无 Developer ID 签名或 Apple 公证；Windows 也未配置商业代码签名。构建、启动检查和 fixture 通过均不等于真实平台发布验收。
 
 ## 实现与来源
 

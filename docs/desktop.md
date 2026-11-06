@@ -30,7 +30,7 @@ npm run tauri -- build
 
 Windows 独立引擎文件名另有 `.exe` 后缀。构建脚本收集 Patchright Node 驱动、平台驱动、许可证和系统凭据后端，不包含用户登录数据。应用数据位于系统应用数据目录 `com.ecojust.easy-publish`。
 
-工作流 `.github/workflows/build.yml` 对三个目标分别执行前端检查、Python 测试、Rust 核心测试、冻结引擎启动检查、Tauri 打包和原生宿主 `--smoke-test`。最后上传安装包为工作流 artifact，不创建 Release。原生启动检查启动内置引擎、读取带认证的状态、确认版本和正常关闭；它不证明真实平台账号登录或发布成功。
+工作流 `.github/workflows/build.yml` 对三个目标分别执行前端检查、Python 测试、Rust 核心测试、冻结引擎启动检查、Tauri 打包和原生宿主 `--smoke-test`。最后上传安装包为工作流 artifact；Release 由独立的手动发布工作流转存已验证产物，不重复编译。原生启动检查启动内置引擎、读取带认证的状态、确认版本和正常关闭；它不证明真实平台账号登录或发布成功。
 
 macOS 使用 ad-hoc 签名并验证 bundle 完整性；此签名方式关闭 Hardened Runtime，避免内置 Python 与动态库没有 Developer Team ID 时被系统拒绝加载，未进行 Apple Developer ID 签名和公证。Windows 安装包内含 WebView2 安装引导程序；缺少 WebView2 时会联网安装。当前未配置商业代码签名证书。不能把这些构建描述为已签名公证的正式分发版本。
 
@@ -54,3 +54,9 @@ cargo fmt --manifest-path src-tauri/Cargo.toml --check
 启动失败时，宿主仅保留最多 16 KiB 的启动 stderr，在应用数据目录 `logs/engine-startup.log` 中记录退出结果和加载错误；弹窗显示退出结果与日志路径。stdout 握手从不写入日志，涉及凭据的诊断行和用户主目录会脱敏，引擎就绪后停止保留 stderr。
 
 设置页提供本机 MCP 配置，复用打包内的引擎 `--mcp` 入口，配置不含连接 token。MCP 客户端需要与桌面应用以同一系统用户运行，应用保持打开；详见 [MCP 接入说明](mcp.md)。安装包 smoke 同时验证标准 stdio 初始化、工具发现、与桌面共享内容库及文章模板预览，不调用真实平台发布。
+
+## 发布已验证版本
+
+确认三个目标的构建和启动检查通过后，将相同应用源码合并到 master 并建立版本 tag。手动触发 `.github/workflows/release.yml`，指定版本 tag、成功构建 run ID 和精确的构建源提交。发布脚本要求 tag 指向当前 checkout，版本一致，除明确允许的发布文档、历史记录和发布脚本外，文件树与构建源一致。
+
+流程下载并验证三个 artifact ZIP 的 SHA-256，仅提取对应的唯一安装器，生成 `SHA256SUMS.txt`，完整上传 draft 后再公开 Release。已公开版本不会被覆盖；Release 说明位于 `docs/releases/`。应用签名、最低系统和真实平台验收范围仍以上文为准。
