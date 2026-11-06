@@ -11,7 +11,7 @@ from easy_publish.article_templates import ARTICLE_TEMPLATES, article_format_not
 from easy_publish.content import ContentInput, image_sources
 from easy_publish.providers import social, wechat
 from easy_publish.providers.base import ProviderContext, PublishPayload
-from easy_publish.vendor.social_auto_upload.utils.article_content import ArticleDocument
+from easy_publish.vendor.social_auto_upload.utils.article_render import load_article
 from easy_publish.vendor.social_auto_upload.uploader.dayu_uploader.article_content import load_dayu_article
 from easy_publish.vendor.social_auto_upload.uploader.xueqiu_uploader.content import load_xueqiu_article
 
@@ -82,8 +82,8 @@ def test_target_html_passes_real_adapter_loaders_and_keeps_image_order(tmp_path,
         assert "".join(parsed.output) == body
         return
     path = social._prepare_html(payload, tmp_path)
-    loader = {"dayu": load_dayu_article, "xueqiu": load_xueqiu_article}.get(platform)
-    document = loader(path) if loader else ArticleDocument(path.read_text(), path.parent)
+    loader = {"dayu": load_dayu_article, "xueqiu": load_xueqiu_article, "zhihu": load_article}[platform]
+    document = loader(path)
     assert len(document.images) == 2
     plain = "".join(document.text)
     for phrase in ("一级标题", "保留引用内容", "第一项", "第二项", "嵌套项目", "原样代码", "表格单元格", "文章结束"):

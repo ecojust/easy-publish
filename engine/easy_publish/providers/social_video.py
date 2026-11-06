@@ -47,6 +47,171 @@ class VideoStageError(Exception):
     """An authored stage-specific message, without platform data or secrets."""
 
 
+@dataclass(frozen=True)
+class ChannelsSubmission:
+    frame: object
+    # A requested cover must not be silently lost to a later editor reload.
+    document: object | None = None
+
+
+# Fixed upstream selectors, read only inside the current composer frame. The
+# upstream waits for an enabled 发表 button after filling basic description;
+# requiring it before filling any text can deadlock on a required field.
+_CHANNELS_UPLOAD_STATE = """() => {
+    const visible = el => !!el && Array.from(el.getClientRects()).some(rect => rect.width > 0 && rect.height > 0) &&
+        getComputedStyle(el).visibility !== 'hidden';
+    const all = selector => Array.from(document.querySelectorAll(selector)).filter(visible);
+    const enabled = el => visible(el) && !el.disabled && el.getAttribute('aria-disabled') !== 'true' &&
+        !el.classList.contains('weui-desktop-btn_disabled');
+    const dialogs = all('.weui-desktop-dialog__wrp, .weui-desktop-dialog');
+    const media = all('div.media-status-content');
+    const statusText = [...media, ...all('div.status-msg')].map(el => el.innerText).join(' ');
+    const percent = statusText.match(/(\\d{1,3})(?:\\.\\d+)?\\s*%/);
+    const progress = percent ? Math.min(100, Number(percent[1])) : null;
+    const body = all('div.input-editor')[0];
+    const title = all('input[placeholder*="短标题"]')[0];
+    const bodyReady = enabled(body) && (body.isContentEditable || !!body.querySelector('[contenteditable="true"]'));
+    const publish = all('div.form-btns button').find(el => el.textContent.trim() === '发表');
+    return {
+        failed: all('div.status-msg.error').length > 0,
+        verification: dialogs.some(el => /实名验证|管理员验证/.test(el.textContent)),
+        blocked: dialogs.length > 0,
+        busy: (progress !== null && progress < 100) || /上传中|正在上传|处理中|正在处理|转码中|正在转码/.test(statusText),
+        percent: progress,
+        media: media.length > 0,
+        removable: all('div.media-status-content div.tag-inner').some(el => el.textContent.trim() === '删除'),
+        ready: enabled(publish),
+        body: bodyReady ? body.innerText.replace(/\\r\\n/g, '\\n').trim() : null,
+        title_present: !!document.querySelector('input[placeholder*="短标题"]'),
+        title: title && enabled(title) ? title.value : null
+    };
+}"""
+
+
+def _channels_body(payload: PublishPayload) -> str:
+    return "\n".join(part for part in (payload.title, " ".join("#" + tag for tag in payload.tags), payload.description) if part)
+
+
+def _channels_trusted_url(url: str) -> bool:
+    try:
+        parsed = urlsplit(url)
+        return parsed.scheme == "https" and parsed.hostname == SITES["channels"].host and parsed.port in {None, 443}
+    except ValueError:
+        return False
+
+
+def _channels_frame(page):
+    """Reacquire the composer: its iframe may reload/remount after transcoding."""
+    if page.is_closed():
+        raise VideoStageError("视频号上传期间浏览器已关闭；尚未点击发表，请先核对平台草稿")
+    if not _channels_trusted_url(page.url):
+        raise VideoStageError("视频号发布页面已离开创作中心；尚未点击发表，请先核对平台草稿")
+    if "login" in urlsplit(page.url).path or any("open.weixin.qq.com/connect/qrconnect" in frame.url for frame in page.frames):
+        raise VideoStageError("视频号登录已失效；尚未点击发表，请重新连接账号并核对平台草稿")
+    # The top-level /platform/post/create is a shell, including while its
+    # iframe remounts. Never use unrelated shell inputs/errors as the editor.
+    frames = [frame for frame in page.frames if not frame.is_detached() and _channels_trusted_url(frame.url)
+              and urlsplit(frame.url).path.rstrip("/") == "/micro/content/post/create"]
+    if len(frames) > 1:
+        raise VideoStageError("视频号存在多个发布编辑器，无法确认本次上传；尚未点击发表，请先核对平台草稿")
+    if frames:
+        return frames[0]
+    return None
+
+
+async def _channels_wait_editor(page, *, seconds: float = 60):
+    try:
+        async with asyncio.timeout(seconds):
+            while True:
+                frame = _channels_frame(page)
+                if frame:
+                    try:
+                        if await frame.locator(SITES["channels"].upload).count():
+                            return frame
+                    except Exception:
+                        pass  # The composer can be replaced while it mounts.
+                await asyncio.sleep(1)
+    except TimeoutError:
+        raise VideoStageError("视频号上传编辑器未能加载；尚未选择视频，请先检查平台页面及网络") from None
+
+
+async def _channels_wait_upload(page, payload: PublishPayload, ctx: ProviderContext, *, seconds: float = UPLOAD_SECONDS):
+    """One upload, bounded waits and repeatable text fills across iframe reloads.
+
+    Readiness is the pinned upstream's enabled 发表 control, supplemented by
+    matching text and absence of upload/processing/error/verification states.
+    No filename or unverified completion API is assumed. A frame reload never
+    selects the file again, and no publish click occurs inside this loop.
+    """
+    expected_body = _channels_body(payload).strip()
+    last_message = ""
+    verification_since = None
+    try:
+        async with asyncio.timeout(seconds):
+            while True:
+                frame = _channels_frame(page)
+                state = None
+                if frame:
+                    try:
+                        state = await frame.evaluate(_CHANNELS_UPLOAD_STATE)
+                    except Exception:
+                        # A document can disappear between frame lookup and
+                        # evaluation at the end of transcoding. Reacquire it.
+                        pass
+                message = "等待视频号上传编辑器恢复，保持窗口打开"
+                if state:
+                    if state["failed"]:
+                        raise VideoStageError("视频号页面显示视频上传失败；尚未点击发表，请检查网络及文件并先核对平台草稿")
+                    if state["verification"]:
+                        verification_since = verification_since or asyncio.get_running_loop().time()
+                        if asyncio.get_running_loop().time() - verification_since >= LOGIN_SECONDS:
+                            raise VideoStageError("视频号管理员验证等待超时；尚未点击发表，请完成平台验证并核对草稿")
+                        message = "视频号要求管理员实名验证，请在发布窗口中完成验证"
+                    elif state["blocked"]:
+                        verification_since = None
+                        message = "视频号有待处理的弹窗，请在发布窗口中确认后继续"
+                    else:
+                        verification_since = None
+                        # Basic fields can be required to enable 发表. Try only
+                        # actionable fields, within this upload budget; a short
+                        # action timeout must not close a still-uploading page.
+                        if state["body"] is not None and state["body"] != expected_body:
+                            try:
+                                async with asyncio.timeout(3):
+                                    await _fill_editor(page, frame.locator("div.input-editor").first, _channels_body(payload))
+                            except Exception:
+                                pass
+                            state = None  # Re-read actual text after any fill/reload.
+                        elif state["title"] is not None and state["title"] != payload.title:
+                            try:
+                                async with asyncio.timeout(3):
+                                    await frame.locator('input[placeholder*="短标题"]').first.fill(payload.title)
+                            except Exception:
+                                pass
+                            state = None
+                        if state:
+                            title_ready = not state["title_present"] or state["title"] == payload.title
+                            if state["ready"] and not state["busy"] and state["body"] == expected_body and title_ready:
+                                ctx.progress("视频号上传及处理完成，正在确认发布信息")
+                                return frame
+                            if state["percent"] is not None and state["busy"]:
+                                message = f"视频号视频上传处理中：{state['percent']}%，请保持发布窗口打开"
+                            elif state["busy"]:
+                                message = "视频号正在上传或处理视频，请保持发布窗口打开"
+                            else:
+                                message = "等待视频号完成上传处理并准备好发表控件，请保持窗口打开"
+                        else:
+                            message = "视频号正在上传，等待表单填写及页面刷新完成"
+                if message != last_message:
+                    ctx.progress(message)
+                    last_message = message
+                await asyncio.sleep(1)
+    except TimeoutError:
+        message = ("等待视频号上传、处理或表单就绪超时；尚未点击发表，请检查平台提示并先核对草稿（上传最多等待 20 分钟）"
+                   if seconds >= UPLOAD_SECONDS else "等待视频号表单或提交控件就绪超时；尚未点击发表，请先核对平台草稿及页面提示")
+        raise VideoStageError(message) from None
+
+
 # The public XHS video editor renders these mutually exclusive siblings of its
 # file input for Uploading/Analyze, Transcoding, Preview, Fail and Cancel. Only
 # Preview is ready; a title field, enabled publish button or 100% is not proof.
@@ -417,13 +582,16 @@ async def _xhs_cover(page, cover: Path) -> None:
 
 
 async def _channels_cover(frame, cover: Path) -> None:
-    await frame.locator('div.horizontal-cover-wrap:has-text("4:3")').first.click()
-    dialog = frame.locator("div.weui-desktop-dialog").filter(has_text="编辑视频号动态").first
+    await frame.locator('div.horizontal-cover-wrap:visible:has-text("4:3")').first.click()
+    # Old hidden cover dialogs remain mounted in this platform's DOM.
+    dialog = frame.locator("div.weui-desktop-dialog:visible").filter(has_text="编辑视频号动态").first
     if not await dialog.count():
-        dialog = frame.locator("div.weui-desktop-dialog").filter(has_text="封面").first
+        dialog = frame.locator("div.weui-desktop-dialog:visible").filter(has_text="封面").first
     await dialog.locator('.single-cover-uploader-wrap input[type="file"]').first.set_input_files(str(cover))
-    await dialog.locator('div.weui-desktop-dialog__ft button.weui-desktop-btn_primary:has-text("确认")').first.click()
-    await dialog.wait_for(state="hidden", timeout=30_000)
+    confirm = dialog.locator('div.weui-desktop-dialog__ft button.weui-desktop-btn_primary:has-text("确认")').first
+    await _wait_enabled(confirm, dialog, timeout=120)
+    await confirm.click(timeout=15_000)
+    await dialog.wait_for(state="hidden", timeout=60_000)
 
 
 async def _prepare(page, platform: str, payload: PublishPayload, ctx: ProviderContext):
@@ -433,26 +601,17 @@ async def _prepare(page, platform: str, payload: PublishPayload, ctx: ProviderCo
         # Opening the editor may create an empty platform draft.
         ctx.submitting("正在打开视频号编辑器；中断后请先核对平台草稿和作品")
         await page.locator("button.weui-desktop-btn").filter(has_text="发表视频").first.click()
-        # The editor is an asynchronously mounted iframe. Never replace a
-        # missing upload control with an unrelated generic input.
-        async with asyncio.timeout(60):
-            while True:
-                found = None
-                for candidate in page.frames:
-                    candidate_url = urlsplit(candidate.url)
-                    if candidate_url.hostname == site.host and await candidate.locator('input[type="file"]').count():
-                        found = candidate
-                        break
-                if found:
-                    frame = found
-                    break
-                await asyncio.sleep(1)
+        frame = await _channels_wait_editor(page)
     upload = frame.locator(site.upload).first
     await upload.wait_for(state="attached", timeout=60_000)
     if platform == "xiaohongshu":
         state = await _xhs_upload_state(page, payload.video_path.name)
         if state["state"] not in {"pending", "idle"}:
             raise VideoStageError("小红书编辑器已有视频或上传任务；尚未选择本次文件，请先核对平台草稿后重新打开发布页")
+    if platform == "channels":
+        state = await frame.evaluate(_CHANNELS_UPLOAD_STATE)
+        if state["removable"] or state["busy"] or state["body"]:
+            raise VideoStageError("视频号编辑器已有视频、正文或上传任务；尚未选择本次文件，请先核对平台草稿")
     # Uploading creates platform-side media/drafts; persist the fence first.
     if platform != "channels":
         ctx.submitting("正在上传视频；中断后请先核对平台草稿和作品，避免重复上传")
@@ -461,6 +620,8 @@ async def _prepare(page, platform: str, payload: PublishPayload, ctx: ProviderCo
     except Exception:
         if platform == "xiaohongshu":
             raise VideoStageError("小红书开始上传视频时中断；尚未点击发布，请先核对平台草稿和网络") from None
+        if platform == "channels":
+            raise VideoStageError("视频号开始上传视频时页面中断；尚未点击发表，请先核对平台草稿和网络") from None
         raise
     ctx.progress("视频上传中，等待平台处理并填写信息")
     if platform == "douyin":
@@ -496,19 +657,17 @@ async def _prepare(page, platform: str, payload: PublishPayload, ctx: ProviderCo
         except Exception:
             raise VideoStageError(f"小红书视频已上传，但填写{stage}未完成；尚未点击发布，请先核对平台草稿及页面提示") from None
         return page.get_by_role("button", name="发布", exact=True).first
-    verification = frame.locator("div.weui-desktop-dialog__wrp:visible").filter(has_text="实名验证").first
-    if await _visible(verification):
-        ctx.progress("视频号要求管理员验证，请在发布浏览器中扫码完成")
-        await verification.wait_for(state="hidden", timeout=LOGIN_SECONDS * 1000)
-    body = "\n".join(part for part in (payload.title, " ".join("#" + tag for tag in payload.tags), payload.description) if part)
-    await _fill_editor(page, frame.locator("div.input-editor").first, body)
-    short_title = frame.locator('input[placeholder*="短标题"]')
-    if await short_title.count():
-        await short_title.first.fill(payload.title)
+    frame = await _channels_wait_upload(page, payload, ctx)
+    document = None
     if payload.cover_path:
-        await _channels_cover(frame, payload.cover_path)
-    name = "保存草稿" if payload.mode == "draft" else "发表"
-    return frame.get_by_role("button", name=name, exact=True).first
+        try:
+            async with asyncio.timeout(180):
+                document = await frame.locator("html").element_handle()
+                await _channels_cover(frame, payload.cover_path)
+        except Exception:
+            raise VideoStageError("视频号视频已上传，但封面设置未完成；尚未点击发表，请先核对平台草稿和封面提示") from None
+    # Do not retain a locator from a document that may be replaced before submit.
+    return ChannelsSubmission(frame, document)
 
 
 async def _success_notice_present(page, platform: str, payload: PublishPayload) -> bool:
@@ -546,7 +705,32 @@ async def _confirm_receipt(page, platform: str, payload: PublishPayload) -> Prov
 
 
 async def _submit_once(page, button, platform: str, payload: PublishPayload, ctx: ProviderContext) -> ProviderResult:
-    await _wait_enabled(button, page)
+    if platform == "channels":
+        prepared = button
+        try:
+            async with asyncio.timeout(60):
+                while True:
+                    frame = await _channels_wait_upload(page, payload, ctx, seconds=60)
+                    if payload.cover_path:
+                        try:
+                            cover_preserved = frame is prepared.frame and prepared.document is not None and await prepared.document.evaluate("el => el.isConnected")
+                        except Exception:
+                            cover_preserved = False
+                        if not cover_preserved:
+                            raise VideoStageError("视频号设置封面后编辑器已刷新，无法确认封面保留；尚未点击发表，请先核对平台草稿")
+                    name = "保存草稿" if payload.mode == "draft" else "发表"
+                    button = frame.get_by_role("button", name=name, exact=True).first
+                    try:
+                        classes = await button.get_attribute("class", timeout=1_000) or ""
+                        if await button.is_visible() and await button.is_enabled() and "weui-desktop-btn_disabled" not in classes:
+                            break
+                    except Exception:
+                        pass  # Reacquire if the iframe changed before the click.
+                    await asyncio.sleep(1)
+        except TimeoutError:
+            raise VideoStageError("视频号提交控件尚未就绪或编辑器已刷新；尚未点击发表，请先核对平台草稿及页面提示") from None
+    else:
+        await _wait_enabled(button, page)
     ctx.progress("正在提交一次，等待平台确认")
     try:
         if platform != "xiaohongshu" and await _success_notice_present(page, platform, payload):
