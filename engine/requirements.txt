@@ -1,0 +1,10 @@
+fastapi==0.121.0
+uvicorn==0.38.0
+httpx==0.28.1
+cryptography>=46.0.3,<47
+keyring>=25.6,<26
+markdown-it-py>=4.0,<5
+bleach>=6.2,<7
+patchright==1.58.2
+tinycss2>=1.4,<2
+Pillow>=11,<13

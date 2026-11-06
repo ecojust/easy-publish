@@ -1,0 +1,139 @@
+name: Build desktop applications
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [master]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  interface:
+    name: Browser interface fixtures
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: Check runner browser
+        run: /usr/bin/google-chrome --version
+      - run: npm run test:ui
+        env:
+          EASY_PUBLISH_CHROMIUM: /usr/bin/google-chrome
+      - name: Upload interface test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: easy-publish-interface-evidence
+          path: |
+            playwright-report/
+            test-results/
+          if-no-files-found: ignore
+          retention-days: 14
+
+  desktop:
+    name: ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS Apple Silicon
+            runner: macos-latest
+            target: aarch64-apple-darwin
+            bundles: app,dmg
+            suffix: ""
+            artifact: macOS-arm64
+          - name: macOS Intel
+            runner: macos-15-intel
+            target: x86_64-apple-darwin
+            bundles: app,dmg
+            suffix: ""
+            artifact: macOS-x64
+          - name: Windows x64
+            runner: windows-latest
+            target: x86_64-pc-windows-msvc
+            bundles: nsis
+            suffix: .exe
+            artifact: Windows-x64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            engine/requirements.txt
+            engine/requirements-dev.txt
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+      - name: Install dependencies
+        run: |
+          npm ci
+          python -m pip install -r engine/requirements-dev.txt pyinstaller==6.22.3 pytest==8.4.2
+      - name: Check frontend and engine
+        run: |
+          npm run check
+          npm run build
+          python -m pytest engine/tests -q
+        env:
+          PYTHONPATH: engine
+      - name: Build embedded engine
+        run: python scripts/build-engine.py --target "${{ matrix.target }}"
+      - name: Check embedded engine without developer Python paths
+        run: python scripts/smoke-engine.py "src-tauri/binaries/easy-publish-engine-${{ matrix.target }}${{ matrix.suffix }}"
+      - name: Check native bridge policies
+        run: cargo test --manifest-path src-tauri/Cargo.toml --no-default-features --locked
+      - name: Build desktop installer
+        run: npm run tauri -- build --target "${{ matrix.target }}" --bundles "${{ matrix.bundles }}"
+        env:
+          # Ad-hoc integrity signing only. These artifacts are not Apple notarized.
+          APPLE_SIGNING_IDENTITY: "-"
+      - name: Verify copied macOS DMG app and embedded startup
+        if: runner.os == 'macOS'
+        run: |
+          dmg_files=(src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg)
+          mount_dir="$(mktemp -d)"
+          copy_dir="$(mktemp -d)"
+          trap 'hdiutil detach "$mount_dir" >/dev/null 2>&1 || true; rm -rf "$mount_dir" "$copy_dir"' EXIT
+          hdiutil attach -readonly -nobrowse -mountpoint "$mount_dir" "${dmg_files[0]}"
+          ditto "$mount_dir/Easy Publish.app" "$copy_dir/Easy Publish.app"
+          app_path="$copy_dir/Easy Publish.app"
+          python scripts/check-macos-signature.py "$app_path" "$app_path/Contents/MacOS/easy-publish-engine"
+          python scripts/smoke-engine.py "$app_path/Contents/MacOS/easy-publish-engine" --clean-environment
+          env -i HOME="$HOME" USER="$USER" LOGNAME="$LOGNAME" TMPDIR="$TMPDIR" PATH=/usr/bin:/bin:/usr/sbin:/sbin LANG=en_US.UTF-8 "$app_path/Contents/MacOS/easy-publish" --smoke-test
+      - name: Verify Windows native embedded startup
+        if: runner.os == 'Windows'
+        run: '"src-tauri/target/${{ matrix.target }}/release/easy-publish.exe" --smoke-test'
+      - name: Upload desktop artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: easy-publish-0.1.3-${{ matrix.artifact }}
+          path: |
+            src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg
+            src-tauri/target/${{ matrix.target }}/release/bundle/nsis/*-setup.exe
+          if-no-files-found: error
+          retention-days: 14
