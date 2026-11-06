@@ -95,7 +95,10 @@ def main() -> None:
             "--collect-submodules", "uvicorn",
         ]
         if platform.system() == "Darwin":
-            command += ["--codesign-identity", "-", "--target-architecture", "arm64" if target.startswith("aarch64") else "x86_64"]
+            # PyInstaller's default signs ad-hoc. Passing an explicit "-" identity
+            # also enables hardened runtime, which rejects the bundled Python
+            # framework because ad-hoc binaries have no matching Team ID.
+            command += ["--target-architecture", "arm64" if target.startswith("aarch64") else "x86_64"]
         command.append(str(bootstrap))
         environment = os.environ.copy()
         # Collection helpers execute before Analysis applies --paths. Make the source
@@ -108,7 +111,7 @@ def main() -> None:
     if os.name != "nt":
         destination.chmod(destination.stat().st_mode | 0o111)
     if platform.system() == "Darwin":
-        subprocess.run(["codesign", "--verify", "--strict", str(destination)], check=True)
+        subprocess.run([sys.executable, str(ROOT / "scripts/check-macos-signature.py"), str(destination)], check=True)
     print(f"Embedded engine built: {destination.relative_to(ROOT)}")
 
 

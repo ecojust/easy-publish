@@ -82,7 +82,9 @@ print(json.dumps({'event': 'result', 'status': 'submitted', 'message': 'fixture 
 class RuntimeTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.temp = tempfile.TemporaryDirectory()
-        self.root = Path(self.temp.name)
+        # Runtime resolves its data directory; macOS /var aliases and Windows
+        # short temp paths must use that same canonical form in assertions.
+        self.root = Path(self.temp.name).resolve()
         self.env = patch.dict(os.environ, TEST_ENV)
         self.env.start()
         self.runtime = Runtime(self.root)
@@ -187,8 +189,8 @@ print(json.dumps({'event':'result','status':'ready','message':'fixture complete'
 """
 
         async def on_event(event):
-            profile = Path(event["message"])
-            self.assertTrue(profile.is_relative_to(self.root / "work"))
+            profile = Path(event["message"]).resolve()
+            self.assertTrue(profile.is_relative_to((self.root / "work").resolve()))
             self.assertEqual((profile / "Cookies").read_text(), "fixture-browser-cookie")
             profiles.append(profile)
             created.set()

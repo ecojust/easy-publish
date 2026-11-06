@@ -4,7 +4,7 @@
 
 面向 **macOS 13.5+（Apple Silicon / Intel）和 Windows 10+ x64**。桌面使用 Tauri 2 和系统 WebView，发布引擎随安装包提供，普通用户无需安装 Python、Node.js 或开发工具。macOS 最低版本由内置 Patchright 的 Node 24 驱动要求决定，来源见[桌面说明](docs/desktop.md)。
 
-当前是 `0.1.0` 开发版本。已实现的平台适配使用隔离的页面与 HTTP fixture 验证，**尚未完成真实账号登录及发布验收**；网站改版、账号权限和人工验证都可能影响实际操作。安装包工作流已配置，产物是否可下载以实际成功的 [Actions 运行](https://github.com/ecojust/easy-publish/actions/workflows/build.yml) 为准；本阶段尚未发布 Release。
+当前是 `0.1.1` 开发版本。已实现的平台适配使用隔离的页面与 HTTP fixture 验证，**尚未完成真实账号登录及发布验收**；网站改版、账号权限和人工验证都可能影响实际操作。安装包工作流已配置，产物是否可下载以实际成功的 [Actions 运行](https://github.com/ecojust/easy-publish/actions/workflows/build.yml) 为准；本阶段尚未发布 Release。
 
 ## 平台能力
 
@@ -25,6 +25,8 @@
 ## 安装测试构建
 
 在成功的 [Actions 构建](https://github.com/ecojust/easy-publish/actions/workflows/build.yml) 页面底部下载对应的 artifact，并解压 ZIP：Apple Silicon 选择 `macOS-arm64`，Intel Mac 选择 `macOS-x64`，Windows 选择 `Windows-x64`。macOS 打开其中的 DMG，将应用拖入“应用程序”；Windows 运行其中的 `-setup.exe`。Actions 下载通常需要登录 GitHub。
+
+macOS 请使用 0.1.1 或之后的构建。0.1.0 在部分 Mac 上会因启动程序与内置 Python 库的签名身份冲突而立即退出；0.1.1 修正了 ad-hoc 签名配置。替换应用前请完全退出旧版本，包括启动错误弹窗。
 
 当前构建尚未配置 Apple 公证或 Windows 商业代码签名。macOS 首次打开如果提示无法验证开发者，可在“系统设置 → 隐私与安全性”中允许打开这份自行确认来源的构建。无需关闭系统的整体安全保护。Windows 安装器在缺少 WebView2 时会下载其运行环境，需要网络；发布浏览器可在应用的设置中准备。
 

@@ -73,7 +73,7 @@ fn command(data_dir: &Path) -> Result<Command, PublicError> {
         .arg(std::process::id().to_string())
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null());
+        .stderr(Stdio::piped());
     // Never allow development vault keys to silently disable OS credential protection in a release.
     if !cfg!(debug_assertions) {
         command
@@ -92,9 +92,10 @@ impl Engine {
     pub fn start(data_dir: &Path) -> Result<Self, PublicError> {
         std::fs::create_dir_all(data_dir)
             .map_err(|_| PublicError::new("data_directory", "无法创建应用数据目录。"))?;
-        let mut child = command(data_dir)?.spawn().map_err(|_| {
-            PublicError::new("engine_start", "内置发布引擎启动失败，请检查安装是否完整。")
+        let mut child = command(data_dir)?.spawn().map_err(|error| {
+            crate::startup::failure(data_dir, "创建引擎进程", &error.to_string(), "")
         })?;
+        let diagnostics = crate::startup::Capture::attach(child.stderr.take().unwrap());
         let stdout = child.stdout.take().unwrap();
         let (sender, receiver) = mpsc::channel();
         std::thread::spawn(move || {
@@ -125,13 +126,30 @@ impl Engine {
                         .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
             });
         let Some(ready) = ready else {
+            // stdout can close just before the process exit becomes observable.
+            let mut exited = child.try_wait().ok().flatten();
+            for _ in 0..25 {
+                if exited.is_some() {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(10));
+                exited = child.try_wait().ok().flatten();
+            }
+            let status = exited
+                .map(|status| status.to_string())
+                .unwrap_or_else(|| "未收到有效启动握手，已停止进程".to_owned());
             let _ = child.kill();
             let _ = child.wait();
-            return Err(PublicError::new(
-                "engine_start",
-                "发布引擎未能完成启动，请重新启动应用。",
+            let stderr = diagnostics.finish(true);
+            return Err(crate::startup::failure(
+                data_dir,
+                "启动握手",
+                &status,
+                &stderr,
             ));
         };
+        // Runtime stderr may include platform data; retain nothing after readiness.
+        let _ = diagnostics.finish(false);
         let client = reqwest::Client::builder()
             .no_proxy()
             .redirect(reqwest::redirect::Policy::none())

@@ -74,11 +74,14 @@ def check_worker(binary: Path, environment: dict[str, str], directory: Path) -> 
             worker.wait(timeout=10)
 
 
-def verify(binary: Path, timeout: int, expected_version: str) -> None:
+def verify(binary: Path, timeout: int, expected_version: str, clean_environment: bool = False) -> None:
     if not binary.is_file():
         raise RuntimeError("Embedded engine binary does not exist")
     with tempfile.TemporaryDirectory(prefix="easy-publish-engine-smoke-") as directory:
         environment = os.environ.copy()
+        if clean_environment:
+            environment = {key: value for key, value in environment.items() if key in {"HOME", "USER", "LOGNAME", "TMPDIR", "LANG", "LC_ALL", "LC_CTYPE"}}
+            environment["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin"
         # Smoke checks run without developer import paths or an installed Python dependency set.
         environment.pop("PYTHONPATH", None)
         environment.pop("PYTHONHOME", None)
@@ -170,10 +173,11 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("binary", type=Path)
     parser.add_argument("--timeout", type=int, default=120)
-    parser.add_argument("--expected-version", default="0.1.0")
+    parser.add_argument("--expected-version", default="0.1.1")
+    parser.add_argument("--clean-environment", action="store_true", help="Use a minimal macOS application environment without developer runtime paths")
     args = parser.parse_args()
     try:
-        verify(args.binary.resolve(), args.timeout, args.expected_version)
+        verify(args.binary.resolve(), args.timeout, args.expected_version, args.clean_environment)
     except Exception as error:
         # Only our own fixed errors may be displayed; never dump a handshake or HTTP headers.
         message = str(error) if isinstance(error, RuntimeError) else type(error).__name__

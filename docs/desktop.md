@@ -1,6 +1,6 @@
 # 桌面外壳与安装包
 
-Easy Publish 使用 Tauri 2 系统 WebView。macOS ARM、macOS Intel 与 Windows x64 分别构建原生安装包，版本为 `0.1.0`。macOS 最低为 13.5；Windows 为 Windows 10／11 x64。该下限匹配内置 Patchright 驱动的 [Node.js 24 系统要求](https://github.com/nodejs/node/blob/v24.13.0/BUILDING.md#platform-list)。Python 3.12 发布引擎由 PyInstaller 打包并随应用安装，用户无需安装 Python。发布浏览器由引擎管理，首次使用在应用中准备。
+Easy Publish 使用 Tauri 2 系统 WebView。macOS ARM、macOS Intel 与 Windows x64 分别构建原生安装包，版本为 `0.1.1`。macOS 最低为 13.5；Windows 为 Windows 10／11 x64。该下限匹配内置 Patchright 驱动的 [Node.js 24 系统要求](https://github.com/nodejs/node/blob/v24.13.0/BUILDING.md#platform-list)。Python 3.12 发布引擎由 PyInstaller 打包并随应用安装，用户无需安装 Python。发布浏览器由引擎管理，首次使用在应用中准备。
 
 ## 开发
 
@@ -32,7 +32,7 @@ Windows 独立引擎文件名另有 `.exe` 后缀。构建脚本收集 Patchrigh
 
 工作流 `.github/workflows/build.yml` 对三个目标分别执行前端检查、Python 测试、Rust 核心测试、冻结引擎启动检查、Tauri 打包和原生宿主 `--smoke-test`。最后上传安装包为工作流 artifact，不创建 Release。原生启动检查启动内置引擎、读取带认证的状态、确认版本和正常关闭；它不证明真实平台账号登录或发布成功。
 
-macOS 使用 ad-hoc 签名并验证 bundle 完整性，未进行 Apple Developer ID 签名和公证。Windows 安装包内含 WebView2 安装引导程序；缺少 WebView2 时会联网安装。当前未配置商业代码签名证书。不能把这些构建描述为已签名公证的正式分发版本。
+macOS 使用 ad-hoc 签名并验证 bundle 完整性；此签名方式关闭 Hardened Runtime，避免内置 Python 与动态库没有 Developer Team ID 时被系统拒绝加载，未进行 Apple Developer ID 签名和公证。Windows 安装包内含 WebView2 安装引导程序；缺少 WebView2 时会联网安装。当前未配置商业代码签名证书。不能把这些构建描述为已签名公证的正式分发版本。
 
 ## 原生接口边界
 
@@ -50,3 +50,5 @@ cargo fmt --manifest-path src-tauri/Cargo.toml --check
 ```
 
 以上核心测试不需要图形库，覆盖 API 白名单、平台链接、导航、HTTP 认证、拒绝重定向、token 脱敏和任意文件读取限制。完整桌面编译仍需要目标平台的 Tauri 系统依赖。
+
+启动失败时，宿主仅保留最多 16 KiB 的启动 stderr，在应用数据目录 `logs/engine-startup.log` 中记录退出结果和加载错误；弹窗显示退出结果与日志路径。stdout 握手从不写入日志，涉及凭据的诊断行和用户主目录会脱敏，引擎就绪后停止保留 stderr。

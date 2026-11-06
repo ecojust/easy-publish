@@ -14,6 +14,7 @@ import sys
 import tempfile
 
 from .vault import Vault
+from . import __version__
 
 
 RESULT_STATUSES = {"ready", "login_required", "draft_created", "submitted", "published", "needs_attention", "failed", "unknown"}
@@ -126,7 +127,7 @@ class Runtime:
         return None
 
     def state(self) -> dict:
-        return {"browserReady": self.browser_path is not None, "browserInstalling": self._install_task is not None and not self._install_task.done(), "browserMessage": self._browser_message, "vaultReady": self.vault.ready, "vaultMessage": self.vault.message, "version": "0.1.0"}
+        return {"browserReady": self.browser_path is not None, "browserInstalling": self._install_task is not None and not self._install_task.done(), "browserMessage": self._browser_message, "vaultReady": self.vault.ready, "vaultMessage": self.vault.message, "version": __version__}
 
     async def install_browser(self) -> None:
         if self._closed or (self._install_task and not self._install_task.done()):
