@@ -1,0 +1,105 @@
+{
+  "repository": "https://github.com/dreammis/social-auto-upload",
+  "commit": "3847fff01f5434a8a32829833163cd6723cabc59",
+  "license": "MIT",
+  "copyright": "Copyright (c) 2023 dreammis",
+  "changes": [
+    "Namespaced imports; app-owned browser configuration and Chromium channel.",
+    "Notify supervisor before entering editors that can create remote drafts.",
+    "Pillow image validation replaces OpenCV and NumPy in Dayu article validation.",
+    "App-owned HTML-only loading and logger shims are new, not copied upstream.",
+    "Remove upstream console print calls; supervisor protocol owns stdout."
+  ],
+  "files": [
+    {
+      "upstream_path": "utils/article_content.py",
+      "upstream_sha256": "b85656df7042a7c239defe0a67bffd0546932687ead012f563f4113ba8ddfe5e",
+      "vendored_path": "utils/article_content.py"
+    },
+    {
+      "upstream_path": "uploader/zhihu_uploader/article.py",
+      "upstream_sha256": "36b159a813a1ef74e271d23ec2207f475d37aaa0cb7d75129b8c108fbe9b33ae",
+      "vendored_path": "uploader/zhihu_uploader/article.py"
+    },
+    {
+      "upstream_path": "uploader/zhihu_uploader/session.py",
+      "upstream_sha256": "eee4181c42ed16a416fee8404d9040fe311bf99bf9de178fa7f0189177ab0f34",
+      "vendored_path": "uploader/zhihu_uploader/session.py"
+    },
+    {
+      "upstream_path": "uploader/zhihu_uploader/constants.py",
+      "upstream_sha256": "d26c4fff4ec9feab7fddf017f407eb72311a270447be65d6205105d14fa6b104",
+      "vendored_path": "uploader/zhihu_uploader/constants.py"
+    },
+    {
+      "upstream_path": "uploader/zhihu_uploader/schedule.py",
+      "upstream_sha256": "a19561b115c94f72f5c9a187186208e3d8f36f13b1a708164829cffc14180b43",
+      "vendored_path": "uploader/zhihu_uploader/schedule.py"
+    },
+    {
+      "upstream_path": "uploader/dayu_uploader/article.py",
+      "upstream_sha256": "1477040cf6e404e44b001aac36bf42340ca3bc696406f6056b16825c92251ca3",
+      "vendored_path": "uploader/dayu_uploader/article.py"
+    },
+    {
+      "upstream_path": "uploader/dayu_uploader/article_content.py",
+      "upstream_sha256": "a75498c2fecfead7fbcf4f053fa881a74d185b19a37bdaa609e9006456ec22a8",
+      "vendored_path": "uploader/dayu_uploader/article_content.py"
+    },
+    {
+      "upstream_path": "uploader/dayu_uploader/article_style.py",
+      "upstream_sha256": "48066bd28433af26ad5e8ab48819530b92212b86e8d597b19f12d7733d43f85d",
+      "vendored_path": "uploader/dayu_uploader/article_style.py"
+    },
+    {
+      "upstream_path": "uploader/dayu_uploader/constants.py",
+      "upstream_sha256": "9e7adc87945d78f2110146b715a3f75ffc8370012ed767ace25d17645a78e140",
+      "vendored_path": "uploader/dayu_uploader/constants.py"
+    },
+    {
+      "upstream_path": "uploader/dayu_uploader/publication.py",
+      "upstream_sha256": "fa6b66e681c4d80d27b197101f78370878e61de8b78dfe839dc1f6e1e86bdca6",
+      "vendored_path": "uploader/dayu_uploader/publication.py"
+    },
+    {
+      "upstream_path": "uploader/dayu_uploader/schedule.py",
+      "upstream_sha256": "7515ee8c2606090cc1f45d402a2b5e674d854ec86833cc177d7e024bfd4676a4",
+      "vendored_path": "uploader/dayu_uploader/schedule.py"
+    },
+    {
+      "upstream_path": "uploader/dayu_uploader/session.py",
+      "upstream_sha256": "bbf52e617b39ef855b931b02408b259df253c823ab8d5a74b90872e19c7e993f",
+      "vendored_path": "uploader/dayu_uploader/session.py"
+    },
+    {
+      "upstream_path": "uploader/dayu_uploader/verification.py",
+      "upstream_sha256": "be08e6f411c2b71057b2decb91424bd38cbcfa80cdcaeca98cb9922ba4cb2ab1",
+      "vendored_path": "uploader/dayu_uploader/verification.py"
+    },
+    {
+      "upstream_path": "uploader/xueqiu_uploader/article.py",
+      "upstream_sha256": "25c3eff7d7ace7e82563a6e74a6edc8d63bd8960ba14a42e1900cc500ad94aeb",
+      "vendored_path": "uploader/xueqiu_uploader/article.py"
+    },
+    {
+      "upstream_path": "uploader/xueqiu_uploader/content.py",
+      "upstream_sha256": "b0546c8fd4d9b902894de72604d02f6574dfbf351fb0fac2f176a8aef0e48185",
+      "vendored_path": "uploader/xueqiu_uploader/content.py"
+    },
+    {
+      "upstream_path": "uploader/xueqiu_uploader/constants.py",
+      "upstream_sha256": "ed4f560479f7440a6057c941579e0303e6eae7b4733ea63f92edbb904ffc2eea",
+      "vendored_path": "uploader/xueqiu_uploader/constants.py"
+    },
+    {
+      "upstream_path": "uploader/xueqiu_uploader/session.py",
+      "upstream_sha256": "8d02614446319bda88da5100e02f6e62b38c9634da0acd6f3e5d43d0d18ce39c",
+      "vendored_path": "uploader/xueqiu_uploader/session.py"
+    },
+    {
+      "upstream_path": "uploader/xueqiu_uploader/verification.py",
+      "upstream_sha256": "43b2c51826d64a610451164f73e19a5d468a2ed9960d74826bab8eef2a3b9677",
+      "vendored_path": "uploader/xueqiu_uploader/verification.py"
+    }
+  ]
+}
