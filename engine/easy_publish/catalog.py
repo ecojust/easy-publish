@@ -49,6 +49,8 @@ PLATFORMS = [
                  select_field("visibility", "分享范围", ["公开", "私人"], False)]),
     platform("douyin", "抖音", "#18181b", "video", ["publish"], 30,
              "浏览器登录；使用平台自动封面，暂不支持指定封面", "https://creator.douyin.com/"),
+    platform("kuaishou", "快手", "#ff5000", "video", ["publish"], 200,
+             "浏览器登录；标题、描述与话题合计最多 500 字符，可指定封面", "https://cp.kuaishou.com/"),
     platform("xiaohongshu", "小红书", "#f43f5e", "video", ["publish"], 20,
              "浏览器登录；标题最多 20 字，话题最多 10 个", "https://creator.xiaohongshu.com/"),
     platform("channels", "微信视频号", "#f59e0b", "video", ["draft", "publish"], 15,

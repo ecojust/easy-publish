@@ -110,7 +110,7 @@ class VideoAdapterTests(unittest.IsolatedAsyncioTestCase):
             ctx.submitting()
             raise RuntimeError("fixture: remote upload may already exist")
 
-        with patch.object(video, "_browser_page", factory), patch.object(video, "_wait_login", AsyncMock()), patch.object(video, "_prepare", prepare), patch.object(video, "_submit_once", AsyncMock()) as submit:
+        with patch.object(video, "_browser_page", factory), patch.object(video, "_wait_login", AsyncMock(return_value=page)), patch.object(video, "_douyin_upload_page", AsyncMock()), patch.object(video, "_prepare", prepare), patch.object(video, "_submit_once", AsyncMock()) as submit:
             result = await video.publish(self.payload, self.ctx)
         self.assertEqual(result.status, "unknown")
         submit.assert_not_awaited()
@@ -133,7 +133,7 @@ class VideoAdapterTests(unittest.IsolatedAsyncioTestCase):
             ctx.submitting()
             return MagicMock()
 
-        with patch.object(video, "_browser_page", factory), patch.object(video, "_wait_login", AsyncMock()), patch.object(video, "_prepare", prepare), patch.object(video, "_submit_once", AsyncMock(return_value=ProviderResult("submitted", "confirmed"))):
+        with patch.object(video, "_browser_page", factory), patch.object(video, "_wait_login", AsyncMock(return_value=page)), patch.object(video, "_douyin_upload_page", AsyncMock()), patch.object(video, "_prepare", prepare), patch.object(video, "_submit_once", AsyncMock(return_value=ProviderResult("submitted", "confirmed"))):
             result = await video.publish(self.payload, self.ctx)
         self.assertEqual(result.status, "submitted")
         context.storage_state.assert_awaited_once_with(path=str(self.ctx.session_path))

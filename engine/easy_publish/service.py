@@ -47,7 +47,9 @@ class Service:
         self.store.close()
 
     def state(self):
+        from .article_templates import ARTICLE_TEMPLATES
         return {"platforms": PLATFORMS,
+                "articleTemplates": ARTICLE_TEMPLATES,
                 "contents": [self.store.content(r) for r in self.store.all("SELECT * FROM contents ORDER BY updated DESC")],
                 "accounts": [self.store.account(r) for r in self.store.all("SELECT * FROM accounts ORDER BY rowid")],
                 "batches": [self.store.batch(r) for r in self.store.all("SELECT * FROM batches ORDER BY created DESC LIMIT 200")],
@@ -188,6 +190,11 @@ class Service:
                 errors.append("账号已被移除")
             else:
                 platform = BY_ID[account["platform"]]
+                prior = self.store.publication_states(content.get("id", "")).get(platform["id"])
+                if prior == "unknown":
+                    warnings.append("此稿件在该平台有结果不明的提交，请先核对平台，避免重复发布")
+                elif prior in {"submitted", "published"}:
+                    warnings.append("此稿件已向该平台提交过；继续发布将创建一次新的投稿")
                 if content["kind"] not in platform["kinds"]:
                     errors.append("此平台不支持当前内容类型")
                 if mode not in platform["modes"]:
@@ -218,6 +225,12 @@ class Service:
                 if platform["id"] == "xiaohongshu" and len(content["tags"]) > 10:
                     errors.append("小红书最多使用 10 个话题")
                 options = content.get("platformOptions", {}).get(platform["id"], {})
+                if platform["id"] == "kuaishou":
+                    from .providers.kuaishou import metadata_errors
+                    errors.extend(metadata_errors(content["title"], content["description"], content["tags"]))
+                    if options:
+                        errors.append("快手平台选项无效")
+                    warnings.append("快手会将标题、描述与话题合并为作品描述；提交后仍需平台审核")
                 for field in platform["fields"]:
                     value = options.get(field["key"], "")
                     if field["required"] and not value:
@@ -299,7 +312,7 @@ class Service:
         if content["kind"] == "article":
             images |= {s.removeprefix("easy-asset://") for s in image_sources(render_article(content["body"])) if s.startswith("easy-asset://")}
         return {"platform_id": task["platform"], "account_id": task["account_id"], "kind": content["kind"], "mode": mode,
-                "title": content["title"].strip(), "body_html": render_article(content["body"]) if content["kind"] == "article" else "",
+                "title": content["title"].strip(), "body_html": render_article(content["body"], content.get("articleTemplateId", "clean"), task["platform"]) if content["kind"] == "article" else "",
                 "description": content["description"], "tags": content["tags"], "author": content["author"],
                 "video_path": asset_path(content["videoAssetId"]), "cover_path": asset_path(content["coverAssetId"]),
                 "images": {i: asset_path(i) for i in images}, "options": content.get("platformOptions", {}).get(task["platform"], {})}

@@ -1,11 +1,12 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
-import type { DesktopBridge } from "./shared/types";
+import type { DesktopBridge, McpConfiguration } from "./shared/types";
 
 const desktop: DesktopBridge = {
   apiRequest: <T,>(method: string, path: string, body?: unknown) =>
     invoke<T>("api_request", { method, path, body: body ?? null }),
   pickFile: (kind) => invoke<string | null>("pick_file", { kind }),
   openExternal: (url) => invoke<void>("open_external", { url }),
+  mcpConfiguration: () => invoke<McpConfiguration>("mcp_configuration"),
 };
 
 export function bridge(): DesktopBridge {

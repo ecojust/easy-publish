@@ -1,9 +1,11 @@
 import { expect, test } from "@playwright/test";
 import path from "node:path";
+import MarkdownIt from "markdown-it";
 
 const fixturePath = path.resolve("tests/ui/bridge-fixture.js");
 
 test.beforeEach(async ({ page }) => {
+  await page.exposeFunction("__renderMarkdownFixture", (body: string) => new MarkdownIt("commonmark", { html: false, breaks: true }).render(body));
   await page.addInitScript({ path: fixturePath });
 });
 
@@ -32,6 +34,32 @@ test("article editing preserves unsaved state, imports local images and sanitize
   expect(browserErrors).toEqual([]);
 });
 
+test("MCP-style article images are discovered from body references without imageAssetIds", async ({ page }) => {
+  const externalRequests: string[] = [];
+  page.on("request", (request) => { if (request.url().startsWith("https://example.test/")) externalRequests.push(request.url()); });
+  await page.goto("/");
+  const importedId = await page.evaluate(async () => {
+    const asset = await window.easyPublish!.apiRequest<any>("POST", "/api/assets/import", { path: "/fixture/mcp-body-image.png", kind: "image" });
+    await window.easyPublish!.apiRequest("POST", "/api/contents", {
+      kind: "article", title: "MCP 正文图片", body: `![正文图片](easy-asset://${asset.id})\n\n![再次引用](easy-asset://${asset.id})\n\n![外部图片](https://example.test/remote.png)\n\n![非法标识](easy-asset://../../private)`,
+      description: "", tags: [], author: "", videoAssetId: null, coverAssetId: null, imageAssetIds: [], platformOptions: {}, articleTemplateId: "clean",
+    });
+    return asset.id;
+  });
+  await page.locator(".draft-item:visible").filter({ hasText: "MCP 正文图片" }).click();
+  await page.getByRole("button", { name: "预览", exact: true }).click();
+  await expect(page.locator('.markdown-preview img[alt="正文图片"]')).toHaveAttribute("src", /^data:image\/png;base64,/);
+  await expect(page.locator('.markdown-preview img[alt="再次引用"]')).toHaveAttribute("src", /^data:image\/png;base64,/);
+  await expect(page.locator(".markdown-preview img")).toHaveCount(2);
+  const result = await page.evaluate(() => ({
+    content: (window as any).__fixture.state.contents.find((item: any) => item.title === "MCP 正文图片"),
+    previews: (window as any).__fixture.calls.filter((call: any) => call.method === "GET" && call.path.endsWith("/preview")),
+  }));
+  expect(result.content.imageAssetIds).toEqual([]);
+  expect([...new Set(result.previews.map((call: any) => call.path))]).toEqual([`/api/assets/${importedId}/preview`]);
+  expect(externalRequests).toEqual([]);
+});
+
 test("preflight blocks errors, dynamic fields persist, enqueue retries reuse requestId", async ({ page }) => {
   await page.goto("/");
   await page.locator(".publish-panel:visible .target-card").filter({ hasText: "品牌公众号" }).click();
@@ -54,6 +82,135 @@ test("preflight blocks errors, dynamic fields persist, enqueue retries reuse req
   expect(result.batches[0].tasks).toHaveLength(2);
   expect(result.calls[0].body.requestId).toBe(result.calls[1].body.requestId);
   expect(result.content.platformOptions.dayu.source).toBe("AI生成");
+});
+
+test("previous platform receipts default off and an explicit repeat creates a fresh batch", async ({ page }) => {
+  await page.addInitScript(() => {
+    const state = (window as any).__fixture.state;
+    const original = state.accounts.find((item: any) => item.id === "a-zhihu");
+    state.accounts.push({ ...original, id: "a-zhihu-second", label: "另一个知乎账号" }, { ...original, id: "a-xueqiu", platformId: "xueqiu", label: "结果待核对的雪球" });
+    state.batches.push({ id: "b-past", contentId: "c-article", title: state.contents[0].title, kind: "article", mode: "publish", createdAt: "2026-11-05T10:00:00Z", tasks: [
+      { id: "t-wechat", accountId: "a-wechat", accountLabel: "品牌公众号", platformId: "wechat", status: "published", message: "测试历史回执", canRetry: false },
+      { id: "t-zhihu", accountId: "a-zhihu", accountLabel: "创作笔记", platformId: "zhihu", status: "submitted", message: "测试历史回执", canRetry: false },
+      { id: "t-xueqiu", accountId: "a-xueqiu", accountLabel: "结果待核对的雪球", platformId: "xueqiu", status: "unknown", message: "测试历史回执", canRetry: false },
+    ] });
+  });
+  await page.goto("/");
+  const target = (label: string) => page.locator(".publish-panel:visible .target-card").filter({ hasText: label });
+  await expect(target("品牌公众号").getByRole("checkbox")).not.toBeChecked();
+  await expect(target("品牌公众号")).toContainText("此前已发布");
+  await expect(target("创作笔记").getByRole("checkbox")).not.toBeChecked();
+  await expect(target("创作笔记")).toContainText("此前已提交");
+  await expect(target("另一个知乎账号").getByRole("checkbox")).not.toBeChecked();
+  await expect(target("结果待核对的雪球").getByRole("checkbox")).not.toBeChecked();
+  await expect(target("结果待核对的雪球")).toContainText("结果待确认");
+  await expect(target("创作工作室").getByRole("checkbox")).toBeChecked();
+  await target("品牌公众号").click();
+  await page.getByLabel("信息来源").selectOption("无需标注");
+  await page.getByRole("button", { name: "检查发布内容", exact: true }).click();
+  await page.getByRole("button", { name: "发布到所选账号", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "发布任务", exact: false })).toBeVisible();
+  await page.evaluate(() => { for (const task of (window as any).__fixture.state.batches[1].tasks) task.status = "submitted"; });
+  await page.getByRole("navigation").getByRole("button", { name: "文章", exact: true }).click();
+  await expect(target("创作工作室")).toContainText("此前已提交");
+  await expect(target("创作工作室").getByRole("checkbox")).not.toBeChecked();
+  await expect(target("品牌公众号").getByRole("checkbox")).not.toBeChecked();
+  await target("品牌公众号").click();
+  await page.getByRole("button", { name: "检查发布内容", exact: true }).click();
+  await page.getByRole("button", { name: "发布到所选账号", exact: true }).click();
+  const batches = await page.evaluate(() => (window as any).__fixture.state.batches);
+  expect(batches).toHaveLength(3);
+  expect(batches[1].contentId).toBe("c-article");
+  expect(batches[2].contentId).toBe("c-article");
+  expect(batches[1].requestId).not.toBe(batches[2].requestId);
+  expect(batches[2].tasks.map((task: any) => task.platformId)).toEqual(["wechat"]);
+});
+
+test("republishing video selects compatible remaining platforms and ignores platform drafts", async ({ page }) => {
+  await page.addInitScript(() => {
+    const state = (window as any).__fixture.state;
+    state.contents.push({ ...state.contents[0], id: "c-video-repeat", kind: "video", title: "继续分享这支视频", body: "" });
+    state.batches.push(
+      { id: "b-video-past", contentId: "c-video-repeat", kind: "video", mode: "publish", title: "继续分享这支视频", createdAt: "2026-11-05T10:00:00Z", tasks: [{ id: "t-video-past", accountId: "a-douyin", accountLabel: "品牌抖音", platformId: "douyin", status: "submitted", canRetry: false }] },
+      { id: "b-platform-draft", contentId: "c-video-repeat", kind: "video", mode: "draft", title: "继续分享这支视频", createdAt: "2026-11-05T10:00:00Z", tasks: [{ id: "t-platform-draft", accountId: "a-kuaishou", accountLabel: "品牌快手", platformId: "kuaishou", status: "draft_created", canRetry: false }] },
+    );
+  });
+  await page.goto("/");
+  await expect(page.locator(".publish-panel:visible input:checked")).toHaveCount(0);
+  await page.getByRole("navigation").getByRole("button", { name: "视频", exact: true }).click();
+  const target = (label: string) => page.locator(".publish-panel:visible .target-card").filter({ hasText: label });
+  await expect(target("品牌抖音").getByRole("checkbox")).not.toBeChecked();
+  for (const label of ["品牌快手", "品牌小红书", "品牌哔哩哔哩"]) await expect(target(label).getByRole("checkbox")).toBeChecked();
+  await expect(target("品牌公众号")).toHaveCount(0);
+  await expect(target("品牌视频号").getByRole("checkbox")).toBeDisabled();
+  await page.getByRole("button", { name: "新建视频", exact: true }).click();
+  await expect(page.locator(".publish-panel:visible input:checked")).toHaveCount(0);
+  await page.locator(".draft-item:visible").filter({ hasText: "继续分享这支视频" }).click();
+  await expect(target("品牌快手").getByRole("checkbox")).toBeChecked();
+  await target("品牌抖音").click();
+  await page.getByRole("button", { name: "选择尚未发布的平台", exact: true }).click();
+  await expect(target("品牌抖音").getByRole("checkbox")).not.toBeChecked();
+});
+
+test("article templates use engine previews and persist through saving and publishing", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("textbox", { name: "文章标题" }).fill("文章模板工作流");
+  await page.getByRole("textbox", { name: "文章正文" }).fill("## 让内容更易读\n\n一份正文，按平台转换格式。\n\n> 清楚的结构，让阅读更轻松。\n\n- 选择模板\n- 检查预览\n- 分发内容");
+  const templatePicker = page.getByRole("group", { name: "文章模板", exact: true });
+  for (const [id, name] of [["clean", "清爽蓝"], ["editorial", "墨色杂志"], ["journal", "暖色手记"], ["tech", "理性科技"]]) {
+    await templatePicker.getByRole("button", { name: new RegExp(name) }).click();
+    await expect(page.locator(`.markdown-preview [data-template="${id}"]`)).toBeVisible();
+    await expect(templatePicker.getByRole("button", { name: new RegExp(name) })).toHaveAttribute("aria-pressed", "true");
+  }
+  await page.getByRole("combobox", { name: "文章预览平台" }).selectOption("zhihu");
+  await expect(page.locator(".preview-notes")).toContainText("原生字体和颜色");
+  await expect(page.locator(".markdown-preview [data-template]")).toHaveCount(0);
+  await page.getByRole("combobox", { name: "文章预览平台" }).selectOption("wechat");
+  await expect(page.locator('.markdown-preview [data-template="tech"]')).toBeVisible();
+  await page.getByRole("button", { name: "保存", exact: true }).click();
+  await expect(page.getByRole("status").filter({ hasText: "稿件已保存" })).toBeVisible();
+  await page.getByRole("button", { name: "新建文章", exact: true }).click();
+  await expect(templatePicker.getByRole("button", { name: /清爽蓝/ })).toHaveAttribute("aria-pressed", "true");
+  await page.locator(".draft-item:visible").filter({ hasText: "文章模板工作流" }).click();
+  await expect(templatePicker.getByRole("button", { name: /理性科技/ })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator('.markdown-preview [data-template="tech"]')).toBeVisible();
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await page.screenshot({ path: "test-results/article-templates-1440.png", fullPage: true });
+  await page.setViewportSize({ width: 1000, height: 950 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false);
+  await page.screenshot({ path: "test-results/article-templates-1000.png", fullPage: true });
+  await page.locator(".publish-panel:visible .target-card").filter({ hasText: "品牌公众号" }).click();
+  await page.getByRole("button", { name: "检查发布内容", exact: true }).click();
+  await page.getByRole("button", { name: "发布到所选账号", exact: true }).click();
+  const result = await page.evaluate(() => ({ contents: (window as any).__fixture.state.contents, batch: (window as any).__fixture.state.batches[0], previews: (window as any).__fixture.calls.filter((call: any) => call.path === "/api/preview/article") }));
+  const saved = result.contents.find((item: any) => item.id === result.batch.contentId);
+  expect(saved.articleTemplateId).toBe("tech");
+  expect(saved.body).toContain("让内容更易读");
+  expect(result.previews.some((call: any) => call.body.articleTemplateId === "tech" && call.body.platformId === "zhihu")).toBe(true);
+  expect(result.previews.some((call: any) => call.body.articleTemplateId === "tech" && call.body.platformId === "wechat")).toBe(true);
+});
+
+test("engine preview failures can retry and preview markup remains constrained", async ({ page }) => {
+  await page.addInitScript(() => {
+    const apiRequest = window.easyPublish!.apiRequest;
+    (window as any).__previewFailure = true;
+    window.easyPublish!.apiRequest = async (method, path, body) => {
+      if (path !== "/api/preview/article") return apiRequest(method, path, body);
+      if ((window as any).__previewFailure) throw { error: "测试：渲染暂时失败" };
+      return { html: '<p style="color:rgb(7,8,9);position:fixed;background-image:url(https://example.test/track.png)" onclick="window.__previewInjected=true">安全模板样式</p><script>window.__previewInjected=true</script><img src="https://example.test/track.png"><a href="javascript:alert(1)">不安全链接</a>', notes: [] } as any;
+    };
+  });
+  await page.goto("/");
+  await page.getByRole("button", { name: "预览", exact: true }).click();
+  await expect(page.getByRole("alert")).toContainText("渲染暂时失败");
+  await page.evaluate(() => { (window as any).__previewFailure = false; });
+  await page.getByRole("button", { name: "重新生成预览", exact: true }).click();
+  const text = page.locator(".markdown-preview p").filter({ hasText: "安全模板样式" });
+  await expect(text).toHaveCSS("color", "rgb(7, 8, 9)");
+  await expect(text).not.toHaveAttribute("onclick");
+  expect(await text.evaluate((node: HTMLElement) => [node.style.position, node.style.backgroundImage])).toEqual(["", ""]);
+  await expect(page.locator('.markdown-preview script, .markdown-preview img, .markdown-preview a[href^="javascript:"]')).toHaveCount(0);
+  expect(await page.evaluate(() => (window as any).__previewInjected)).toBeUndefined();
 });
 
 test("video import and platform draft submission target only video accounts", async ({ page }) => {
@@ -107,6 +264,107 @@ test("accounts connect without echoing secrets and runtime can be prepared", asy
   await expect(page.getByRole("button", { name: "下载并准备浏览器" })).toBeVisible();
   await page.getByRole("button", { name: "下载并准备浏览器" }).click();
   await expect(page.getByRole("button", { name: "浏览器已就绪" })).toBeDisabled();
+});
+
+for (const target of [{ id: "a-douyin", label: "品牌抖音", platform: "Douyin" }, { id: "a-kuaishou", label: "品牌快手", platform: "Kuaishou" }]) {
+  test(`${target.platform} login progress stays unavailable until the engine reports ready`, async ({ page }) => {
+    await page.addInitScript(({ id }) => {
+      const fixture = (window as any).__fixture;
+      const account = fixture.state.accounts.find((item: any) => item.id === id);
+      account.status = "login_required";
+      account.message = "请连接测试账号";
+      fixture.deferLogin(id);
+    }, target);
+    await page.goto("/");
+    await page.getByRole("navigation").getByRole("button", { name: "视频", exact: true }).click();
+    const checkbox = page.locator(".publish-panel:visible .target-card").filter({ hasText: target.label }).getByRole("checkbox");
+    await expect(checkbox).toBeDisabled();
+    await page.getByRole("navigation").getByRole("button", { name: "账号管理" }).click();
+    const card = page.locator(".account-card").filter({ hasText: target.label });
+    await card.getByRole("button", { name: "登录账号", exact: true }).click();
+    await expect(card.getByText("等待登录", { exact: true })).toBeVisible();
+    await expect(card.getByRole("button", { name: "等待完成登录", exact: true })).toBeDisabled();
+    await expect(card.getByRole("button", { name: `检查 ${target.label} 连接`, exact: true })).toBeDisabled();
+    await expect(card).toContainText("等待扫码登录（测试进度）");
+    await page.evaluate(({ id }) => (window as any).__fixture.loginProgress(id, "已扫码，正在验证账号（测试进度）"), target);
+    await expect(card).toContainText("已扫码，正在验证账号（测试进度）");
+    await expect(card.getByText("已连接", { exact: true })).toHaveCount(0);
+    await page.getByRole("navigation").getByRole("button", { name: "视频", exact: true }).click();
+    await expect(checkbox).toBeDisabled();
+    await page.evaluate(({ id }) => (window as any).__fixture.completeLogin(id), target);
+    await expect(checkbox).toBeEnabled();
+    await page.getByRole("navigation").getByRole("button", { name: "账号管理" }).click();
+    await expect(card.getByText("已连接", { exact: true })).toBeVisible();
+    await expect(card.getByRole("button", { name: "重新连接", exact: true })).toBeEnabled();
+    await expect(card.getByText("等待登录", { exact: true })).toHaveCount(0);
+    const requests = await page.evaluate(({ id }) => (window as any).__fixture.calls.filter((call: any) => call.path === `/api/accounts/${id}/login`), target);
+    expect(requests).toHaveLength(1);
+  });
+}
+
+test("Kuaishou is a video-only browser account and joins multi-platform publishing", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.locator(".publish-panel:visible").getByText("快手", { exact: true })).toHaveCount(0);
+  await expect(page.locator(".publish-panel:visible .target-card").filter({ hasText: "品牌快手" })).toHaveCount(0);
+  await page.getByRole("navigation").getByRole("button", { name: "账号管理" }).click();
+  await page.getByRole("button", { name: "文章平台", exact: true }).click();
+  await expect(page.locator(".account-card").filter({ hasText: "品牌快手" })).toHaveCount(0);
+  await page.getByRole("button", { name: "视频平台", exact: true }).click();
+  await expect(page.locator(".account-card").filter({ hasText: "品牌快手" }).locator(".capability-tags")).toHaveText("视频");
+  await page.getByRole("button", { name: "添加账号", exact: true }).click();
+  const modal = page.getByRole("dialog");
+  await modal.getByRole("button", { name: "快手 视频", exact: true }).click();
+  await expect(modal.getByLabel("AppSecret", { exact: true })).toHaveCount(0);
+  await modal.getByLabel("账号备注").fill("快手创作账号");
+  await modal.getByRole("button", { name: "添加账号", exact: true }).click();
+  await expect(modal).not.toBeVisible();
+  const card = page.locator(".account-card").filter({ hasText: "快手创作账号" });
+  await expect(card.locator(".platform-mark")).toHaveText("快");
+  await card.getByRole("button", { name: "登录账号", exact: true }).click();
+  await expect(card.getByText("已连接", { exact: true })).toBeVisible();
+  await page.getByRole("navigation").getByRole("button", { name: "视频", exact: true }).click();
+  const target = page.locator(".publish-panel:visible .target-card").filter({ hasText: "快手创作账号" });
+  await expect(target.getByRole("checkbox")).toBeEnabled();
+  await expect(page.locator(".publish-panel:visible .supported-platforms")).toContainText("快手");
+  await page.getByRole("button", { name: "平台草稿", exact: true }).click();
+  await expect(target.getByRole("checkbox")).toBeDisabled();
+  await expect(target).toContainText("不支持草稿");
+  await page.getByRole("button", { name: "发布内容", exact: true }).click();
+  await page.getByRole("textbox", { name: "视频标题" }).fill("快手批量发布测试");
+  await page.evaluate(() => (window as any).__fixture.pick("/fixture/kuaishou-video.mp4"));
+  await page.getByRole("button", { name: "点击导入视频", exact: false }).click();
+  await page.evaluate(() => (window as any).__fixture.pick("/fixture/kuaishou-cover.png"));
+  await page.getByRole("button", { name: "上传封面", exact: true }).click();
+  await page.getByLabel("视频描述").fill("同一支视频发布到多个平台");
+  await page.getByRole("textbox", { name: "话题标签" }).fill("创作");
+  await page.getByRole("textbox", { name: "话题标签" }).press("Enter");
+  await target.click();
+  await page.locator(".publish-panel:visible .target-card").filter({ hasText: "品牌小红书" }).click();
+  await page.getByRole("button", { name: "检查发布内容", exact: true }).click();
+  await expect(page.getByText("发布前检查通过")).toBeVisible();
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await page.screenshot({ path: "test-results/kuaishou-video-1440.png", fullPage: true });
+  await page.setViewportSize({ width: 1000, height: 950 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false);
+  await page.screenshot({ path: "test-results/kuaishou-video-1000.png", fullPage: true });
+  await page.getByRole("button", { name: "发布到所选账号", exact: true }).click();
+  await expect(page.locator(".task-row").filter({ hasText: "快手创作账号" }).getByText("等待处理", { exact: true })).toBeVisible();
+  const result = await page.evaluate(() => ({
+    account: (window as any).__fixture.state.accounts.find((item: any) => item.label === "快手创作账号"),
+    content: (window as any).__fixture.state.contents.find((item: any) => item.title === "快手批量发布测试"),
+    batch: (window as any).__fixture.state.batches[0],
+    preflight: (window as any).__fixture.calls.find((call: any) => call.path === "/api/preflight"),
+    enqueue: (window as any).__fixture.calls.find((call: any) => call.path === "/api/batches"),
+    create: (window as any).__fixture.calls.find((call: any) => call.path === "/api/accounts" && call.method === "POST"),
+  }));
+  expect(result.create.body).toEqual({ platformId: "kuaishou", label: "快手创作账号" });
+  expect(result.content.videoAssetId).toBeTruthy();
+  expect(result.content.coverAssetId).toBeTruthy();
+  expect(result.content.tags).toEqual(["创作"]);
+  expect(result.preflight.body).toEqual({ contentId: result.content.id, accountIds: [result.account.id, "a-xhs"], mode: "publish" });
+  expect(result.enqueue.body).toMatchObject(result.preflight.body);
+  expect(result.batch.kind).toBe("video");
+  expect(result.batch.tasks.map((task: any) => task.platformId)).toEqual(["kuaishou", "xiaohongshu"]);
 });
 
 test("Bilibili accounts connect as video-only targets", async ({ page }) => {

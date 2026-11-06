@@ -1,8 +1,8 @@
 use crate::policy::PublicError;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
-    collections::HashSet,
+    collections::{BTreeMap, HashSet},
     io::{BufRead, BufReader, Read},
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
@@ -28,8 +28,30 @@ pub struct Engine {
     chosen_files: Mutex<HashSet<PathBuf>>,
 }
 
-fn command(data_dir: &Path) -> Result<Command, PublicError> {
-    let mut command = if cfg!(debug_assertions) {
+#[derive(Debug, Serialize)]
+pub struct McpConfiguration {
+    pub command: String,
+    pub args: Vec<String>,
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub env: BTreeMap<String, String>,
+}
+
+fn bundled_engine_path(executable: &Path, windows: bool) -> Result<PathBuf, PublicError> {
+    if !executable.is_absolute() {
+        return Err(PublicError::new("engine_missing", "无法定位内置发布引擎。"));
+    }
+    let parent = executable
+        .parent()
+        .ok_or_else(|| PublicError::new("engine_missing", "无法定位内置发布引擎。"))?;
+    Ok(parent.join(if windows {
+        "easy-publish-engine.exe"
+    } else {
+        "easy-publish-engine"
+    }))
+}
+
+fn base_command() -> Result<Command, PublicError> {
+    if cfg!(debug_assertions) {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
         let python = if cfg!(windows) {
             root.join(".venv/Scripts/python.exe")
@@ -45,27 +67,60 @@ fn command(data_dir: &Path) -> Result<Command, PublicError> {
         let mut command = Command::new(python);
         command.args(["-m", "easy_publish"]);
         command.env("PYTHONPATH", root.join("engine"));
-        command
+        Ok(command)
     } else {
         let executable = std::env::current_exe()
             .map_err(|_| PublicError::new("engine_missing", "无法定位内置发布引擎。"))?;
-        let parent = executable
-            .parent()
-            .ok_or_else(|| PublicError::new("engine_missing", "无法定位内置发布引擎。"))?;
-        let filename = if cfg!(windows) {
-            "easy-publish-engine.exe"
-        } else {
-            "easy-publish-engine"
-        };
-        let path = parent.join(filename);
+        let path = bundled_engine_path(&executable, cfg!(windows))?;
         if !path.is_file() {
             return Err(PublicError::new(
                 "engine_missing",
                 "安装包缺少发布引擎，请重新安装完整版本。",
             ));
         }
-        Command::new(path)
+        Ok(Command::new(path))
+    }
+}
+
+fn mcp_config_for(mut command: Command, data_dir: &Path) -> Result<McpConfiguration, PublicError> {
+    if !Path::new(command.get_program()).is_absolute() || !data_dir.is_absolute() {
+        return Err(PublicError::new(
+            "mcp_configuration",
+            "MCP 配置需要完整的本机路径。",
+        ));
+    }
+    command.arg("--mcp").arg("--data-dir").arg(data_dir);
+    let as_text = |value: &std::ffi::OsStr| {
+        value.to_str().map(str::to_owned).ok_or_else(|| {
+            PublicError::new(
+                "mcp_configuration",
+                "本机路径包含不支持的字符，无法生成 MCP 配置。",
+            )
+        })
     };
+    let mut env = BTreeMap::new();
+    // Only the development module lookup path is part of client configuration.
+    // Never copy inherited environment, engine tokens or connection descriptors.
+    for (key, value) in command.get_envs() {
+        if key == "PYTHONPATH" {
+            if let Some(value) = value {
+                env.insert("PYTHONPATH".to_owned(), as_text(value)?);
+            }
+        }
+    }
+    Ok(McpConfiguration {
+        command: as_text(command.get_program())?,
+        args: command.get_args().map(as_text).collect::<Result<_, _>>()?,
+        env,
+    })
+}
+
+pub fn mcp_configuration(data_dir: &Path) -> Result<McpConfiguration, PublicError> {
+    mcp_config_for(base_command()?, data_dir)
+}
+
+fn command(data_dir: &Path) -> Result<Command, PublicError> {
+    let mut command = base_command()?;
     command
         .arg("--data-dir")
         .arg(data_dir)
@@ -315,6 +370,65 @@ impl Drop for Engine {
 mod tests {
     use super::*;
     use std::{io::Write, net::TcpListener};
+
+    #[test]
+    fn locates_packaged_engine_beside_desktop_on_mac_and_windows() {
+        let root = std::env::temp_dir().join("Easy Publish configuration fixtures");
+        let mac_dir = root.join("Easy Publish.app/Contents/MacOS");
+        assert_eq!(
+            bundled_engine_path(&mac_dir.join("easy-publish"), false).unwrap(),
+            mac_dir.join("easy-publish-engine")
+        );
+        let windows_dir = root.join("Program Files/Easy Publish");
+        assert_eq!(
+            bundled_engine_path(&windows_dir.join("easy-publish.exe"), true).unwrap(),
+            windows_dir.join("easy-publish-engine.exe")
+        );
+        assert!(bundled_engine_path(Path::new("relative/easy-publish"), false).is_err());
+    }
+
+    #[test]
+    fn packaged_mcp_configuration_preserves_paths_as_separate_arguments() {
+        let root = std::env::temp_dir().join("Easy Publish 配置 fixtures");
+        let executable = root.join("Easy Publish.app/Contents/MacOS/easy-publish-engine");
+        let data_dir = root.join("Library/Application Support/easy-publish");
+        let configuration = mcp_config_for(Command::new(&executable), &data_dir).unwrap();
+        let value = serde_json::to_value(configuration).unwrap();
+        assert_eq!(value["command"], executable.to_str().unwrap());
+        assert_eq!(value["args"], json!(["--mcp", "--data-dir", data_dir]));
+        assert!(value.get("env").is_none());
+        assert_eq!(value.as_object().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn development_mcp_configuration_exports_only_module_lookup_environment() {
+        let root = std::env::temp_dir().join("Easy Publish source fixtures");
+        let python = root.join(".venv/bin/python");
+        let modules = root.join("engine");
+        let data_dir = root.join("Application Support/easy-publish");
+        let mut command = Command::new(&python);
+        command
+            .args(["-m", "easy_publish"])
+            .env("PYTHONPATH", &modules)
+            .env("EASY_PUBLISH_TOKEN", "fixture-secret-not-for-clients")
+            .env("EASY_PUBLISH_TEST_KEY", "fixture-key-not-for-clients");
+        let value = serde_json::to_value(mcp_config_for(command, &data_dir).unwrap()).unwrap();
+        assert_eq!(value["command"], python.to_str().unwrap());
+        assert_eq!(
+            value["args"],
+            json!(["-m", "easy_publish", "--mcp", "--data-dir", data_dir])
+        );
+        assert_eq!(value["env"], json!({"PYTHONPATH": modules}));
+        assert!(!value.to_string().contains("fixture-secret"));
+        assert!(!value.to_string().contains("fixture-key"));
+    }
+
+    #[test]
+    fn mcp_configuration_rejects_relative_program_and_data_paths() {
+        let root = std::env::temp_dir();
+        assert!(mcp_config_for(Command::new("python"), &root).is_err());
+        assert!(mcp_config_for(Command::new(root.join("engine")), Path::new("data")).is_err());
+    }
 
     fn test_engine(port: u16) -> Engine {
         let child = Command::new(std::env::current_exe().unwrap())

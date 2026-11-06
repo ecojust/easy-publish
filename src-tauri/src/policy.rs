@@ -30,6 +30,7 @@ pub fn allowed_route(method: &str, path: &str) -> bool {
         ("GET", ["", "api", "state"]) => true,
         ("POST", ["", "api", "contents" | "accounts" | "preflight" | "batches"]) => true,
         ("POST", ["", "api", "assets", "import"]) => true,
+        ("POST", ["", "api", "preview", "article"]) => true,
         ("POST", ["", "api", "runtime", "browser", "install"]) => true,
         ("PUT" | "DELETE", ["", "api", "contents", id]) => identifier(id),
         ("DELETE", ["", "api", "accounts", id]) => identifier(id),
@@ -60,6 +61,7 @@ pub fn allowed_external_url(value: &str) -> bool {
         "weixin.qq.com",
         "channels.weixin.qq.com",
         "douyin.com",
+        "kuaishou.com",
         "xiaohongshu.com",
         "bilibili.com",
         "zhihu.com",
@@ -95,6 +97,7 @@ mod tests {
             ("GET", "/api/state"),
             ("PUT", "/api/contents/id-1"),
             ("POST", "/api/accounts/abc/login"),
+            ("POST", "/api/preview/article"),
             ("POST", "/api/tasks/id_1/retry"),
         ] {
             assert!(allowed_route(method, path));
@@ -102,6 +105,7 @@ mod tests {
         for (method, path) in [
             ("GET", "http://example.com/api/state"),
             ("POST", "/api/shutdown"),
+            ("POST", "/api/mcp/call"),
             ("GET", "/api/state?x=1"),
             ("DELETE", "/api/accounts/../state"),
             ("POST", "/api/tasks/%2e%2e/retry"),
@@ -115,6 +119,9 @@ mod tests {
     fn links_cannot_launch_programs_or_lookalike_domains() {
         assert!(allowed_external_url("https://mp.weixin.qq.com/s/abc"));
         assert!(allowed_external_url("https://www.bilibili.com/video/BV123"));
+        assert!(allowed_external_url(
+            "https://cp.kuaishou.com/article/manage/video"
+        ));
         for url in [
             "file:///etc/passwd",
             "javascript:alert(1)",
@@ -123,6 +130,8 @@ mod tests {
             "https://douyin.com@evil.com/",
             "https://user@douyin.com",
             "https://douyin.com:444/",
+            "https://cp.kuaishou.com.evil.com/",
+            "https://cp.kuaishou.com@evil.com/",
         ] {
             assert!(!allowed_external_url(url));
         }

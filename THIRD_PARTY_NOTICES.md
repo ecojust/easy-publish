@@ -11,7 +11,7 @@ Easy Publish 使用 [MIT 许可证](LICENSE)。本文件记录直接参考或包
 
 文章适配保留了 18 份明确列出的上游源文件，并进行了命名空间、浏览器配置、任务状态与素材处理方面的本地调整。逐文件来源和原始 SHA-256 记录在 [SOURCE.json](engine/easy_publish/vendor/social_auto_upload/SOURCE.json)，原始许可证保留于 [vendor LICENSE](engine/easy_publish/vendor/social_auto_upload/LICENSE)，变更和验证边界见 [NOTICE.md](engine/easy_publish/vendor/social_auto_upload/NOTICE.md)。
 
-抖音、小红书和视频号适配参考该提交的创作中心入口、登录标志与编辑器选择器，由本项目实现会话隔离、任务监督、单次提交及结果判定。具体源文件与完整许可另保留在 [VIDEO_SOURCES.md](engine/easy_publish/providers/VIDEO_SOURCES.md)。
+抖音、小红书、视频号和快手适配参考该提交的创作中心入口、登录标志与编辑器选择器，由本项目实现会话隔离、任务监督、单次提交及结果判定。具体源文件与完整许可另保留在 [VIDEO_SOURCES.md](engine/easy_publish/providers/VIDEO_SOURCES.md) 和 [KUAISHOU_SOURCES.md](engine/easy_publish/providers/KUAISHOU_SOURCES.md)。
 
 没有复制上游账号、cookie、token 缓存、私有配置或整个项目。上游源码中关于“实测”的描述属于上游观察，不表示 Easy Publish 已通过真实账号发布验收。
 

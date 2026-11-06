@@ -6,7 +6,7 @@
 
 - social-auto-upload 固定参考 `3847fff01f5434a8a32829833163cd6723cabc59`（MIT）；平台驱动、登录与作品回执分开。
 - oDesk 固定参考 `d062c05b3442f45205ff83cc28497d435fccce99`（MIT）；借鉴公众号文章、封面和正文图片流程，使用确定性的官方 API。
-- 文章：微信公众号、知乎、大鱼号、雪球；视频：抖音、小红书、视频号、哔哩哔哩。知乎视频、大鱼号视频尚未接入。
+- 文章：微信公众号、知乎、大鱼号、雪球；视频：抖音、快手、小红书、视频号、哔哩哔哩。知乎视频、大鱼号视频尚未接入。
 - 哔哩哔哩基于 MIT 许可 biliup/biliup `f23b7614b250caacba8a1475412515264dc30558` 的 HTTP 协议独立实现，使用浏览器登录、UPOS 分片上传和单次 Web 投稿，不下载原生 CLI。
 - 公众号草稿和正式提交／发布分别记录；不把图片笔记标成文章，不把请求受理、点击发布或进程退出描述成公开发布成功。
 
@@ -19,6 +19,7 @@ Tauri 命令：
 - `api_request({method,path,body})`：宿主向自己的引擎转发已认证 JSON 请求，路径只允许 `/api/` 下的已定义接口。
 - `pick_file({kind})`：原生选择 `video`、`image` 或 `article` 文件，返回绝对路径或 null。
 - `open_external({url})`：只打开允许的 HTTPS 平台链接。
+- `mcp_configuration()`：返回本机 stdio 引擎命令、参数及仅开发环境所需的 PYTHONPATH；不读取或返回 MCP token。
 
 浏览器开发／验证可注入 `window.easyPublish` 同形接口；测试替身必须明确标注，不在产品中伪造已登录账号或发布成功。
 
@@ -26,7 +27,9 @@ API 成功直接返回 JSON，失败为 `{"error":"公开且已脱敏的错误",
 
 | 方法／路径 | 参数／响应 |
 | --- | --- |
-| GET /api/state | `{platforms,accounts,contents,batches,runtime}`，见 `src/shared/types.ts` |
+| GET /api/state | `{platforms,accounts,contents,batches,runtime,articleTemplates}`，见 `src/shared/types.ts` |
+| POST /api/preview/article | `{body,articleTemplateId,platformId?}`；返回安全 HTML 及平台格式说明，不保存或发布 |
+| POST /api/mcp/call | `{name,arguments}`；仅专用 MCP token 和实例编号可用，返回 MCP CallToolResult |
 | POST /api/contents | ContentInput；返回 Content |
 | PUT /api/contents/:id | ContentInput；返回 Content |
 | DELETE /api/contents/:id | 删除本地稿件；返回 `{ok:true}` |
@@ -46,7 +49,9 @@ API 成功直接返回 JSON，失败为 `{"error":"公开且已脱敏的错误",
 
 ## 任务与数据
 
-SQLite 保存稿件、账号公开元数据、批次及各目标状态。批次捕获不可变稿件快照、账号 ID／名称和目标，逐个目标执行，分别给出结果。已有待执行任务的账号不能被删除或重新登录。明确失败的目标可重试；成功目标不重复，结果未知的目标须先在平台核对。关闭应用后不自动重新提交未确认结果。
+SQLite 保存稿件、账号公开元数据、批次及各目标状态。`Content.platformPublicationStates` 从全部任务读取每个平台最新的 submitted／published／unknown 回执，不受界面最近 200 批限制；草稿和失败不覆盖历史成功。已发布稿件可以使用新的 requestId 再次投稿，同一 requestId 仍返回原批次。批次捕获不可变稿件快照、账号 ID／名称和目标，逐个目标执行，分别给出结果。已有待执行任务的账号不能被删除或重新登录。明确失败的目标可重试；成功目标不重复，结果未知的目标须先在平台核对。关闭应用后不自动重新提交未确认结果。
+
+`ContentInput.articleTemplateId` 为 clean／editorial／journal／tech，旧稿件默认为 clean。Markdown 保持原稿，在生成每个目标的 payload 时按模板及平台转换 HTML；预览与实际提交使用同一服务端渲染器。
 
 `ContentInput.platformOptions` 按平台 ID 保存声明等表单值；平台通过 `Platform.fields` 声明必填项、选项及提示，前端与 preflight 都校验。适配器收到当前目标的平面 `PublishPayload.options`。
 
@@ -57,3 +62,11 @@ SQLite 保存稿件、账号公开元数据、批次及各目标状态。批次�
 worker 的统一输入／输出和事件由 `engine/easy_publish/providers/base.py` 定义。每个任务独立进程、总时限、只点击／提交一次；提交之前先发送 submitting 事件，父进程 SQLite 提交完成后回传 ACK，worker 收到确认才允许发生平台写入。无法判断提交结果时返回 unknown，不自动重试。
 
 本轮开发验证使用隔离的接口／页面 fixture，不向真实平台发布文章或视频。真实账号授权与发布由软件用户在应用中操作；缺乏实际平台回执时如实记录验证范围。
+
+## MCP 连接
+
+内置引擎 `--mcp --data-dir <同一应用数据目录>` 启动标准 stdio JSON-RPC 服务，不打开第二个数据库实例。它通过私有 `mcp-endpoint.json` 连接已运行的桌面引擎，固定 loopback 地址，不使用系统代理或跟随跳转。MCP token 与原生宿主 token 不同：前者仅可访问 `/api/mcp/call`，不能读取账号密钥、启动登录或访问普通桌面 API；renderer 同样不能调用 MCP 路由。
+
+POSIX 目录／文件要求当前用户所有且权限为 0700／0600，拒绝符号链接和不安全文件；Windows token 使用当前用户 DPAPI 保护。每次启动更换 token 和实例编号，正常退出移除对应发现文件。配置 JSON 只包含引擎路径及参数。
+
+MCP 工具复用 Service 的预检、不可变快照、账号类型限制和发布队列。省略 accountIds 时过滤已连接、支持内容类型／操作且没有历史 submitted／published／unknown 的平台；显式账号必须通过类型与预检。发布请求 UUID 在默认账号筛选之前查重，避免已成功的重试被当成新请求。详见 [MCP 接入说明](mcp.md)。

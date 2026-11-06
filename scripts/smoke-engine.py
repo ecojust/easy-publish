@@ -75,6 +75,91 @@ def check_worker(binary: Path, environment: dict[str, str], directory: Path,
             worker.wait(timeout=10)
 
 
+def check_mcp(binary: Path, environment: dict[str, str], directory: Path, port: int, token: str) -> None:
+    """Exercise the frozen stdio bridge against this running desktop database."""
+    options = {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {"start_new_session": True}
+    bridge = subprocess.Popen([str(binary), "--mcp", "--data-dir", str(directory)],
+                              stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                              env=environment, **options)
+    responses: queue.Queue[bytes] = queue.Queue()
+
+    def read_lines():
+        while True:
+            line = bridge.stdout.readline(1_000_001)
+            responses.put(line)
+            if not line:
+                return
+
+    reader = threading.Thread(target=read_lines, daemon=True)
+    reader.start()
+
+    def send(value):
+        bridge.stdin.write((json.dumps(value, ensure_ascii=False) + "\n").encode("utf-8"))
+        bridge.stdin.flush()
+
+    def call(identifier, method, params):
+        send({"jsonrpc": "2.0", "id": identifier, "method": method, "params": params})
+        try:
+            line = responses.get(timeout=45)
+            response = json.loads(line)
+        except (queue.Empty, ValueError, UnicodeError):
+            raise RuntimeError("Frozen MCP bridge returned no valid protocol response") from None
+        if len(line) > 1_000_000 or response.get("id") != identifier or response.get("error") or "result" not in response:
+            raise RuntimeError("Frozen MCP bridge failed its protocol check")
+        return response["result"]
+
+    def tool(identifier, name, arguments):
+        result = call(identifier, "tools/call", {"name": name, "arguments": arguments})
+        if result.get("isError") or not isinstance(result.get("structuredContent"), dict):
+            raise RuntimeError("Frozen MCP bridge could not call its desktop tool")
+        return result["structuredContent"]
+
+    try:
+        initialized = call(1, "initialize", {"protocolVersion": "2025-06-18", "capabilities": {},
+                                           "clientInfo": {"name": "offline-package-smoke", "version": "1.0"}})
+        if initialized.get("protocolVersion") != "2025-06-18":
+            raise RuntimeError("Frozen MCP protocol negotiation failed")
+        send({"jsonrpc": "2.0", "method": "notifications/initialized"})
+        listed = call(2, "tools/list", {})
+        if not {"save_content", "publish", "list_accounts", "preview_article"} <= {item["name"] for item in listed.get("tools", [])}:
+            raise RuntimeError("Frozen MCP tools are missing")
+        capabilities = tool(3, "list_platforms", {"kind": "article"})
+        if not capabilities.get("platforms") or any("article" not in p["kinds"] for p in capabilities["platforms"]):
+            raise RuntimeError("Frozen MCP returned incompatible article platforms")
+        saved = tool(4, "save_content", {"content": {"kind": "article", "title": "MCP 本地草稿检查",
+                    "body": "## 中文文章\n\n仅保存本地，不发布。", "articleTemplateId": "journal"}})["content"]
+        status, state = request(port, "/api/state", token)
+        match = next((item for item in state.get("contents", []) if item.get("id") == saved.get("id")), None)
+        if status != 200 or not match or match.get("articleTemplateId") != "journal":
+            raise RuntimeError("MCP did not use the desktop's shared content library")
+        preview = tool(5, "preview_article", {"body": saved["body"], "articleTemplateId": "journal", "platformId": "wechat"})
+        if "中文文章" not in preview.get("html", "") or "style=" not in preview["html"]:
+            raise RuntimeError("Frozen MCP article formatting failed")
+        status, deleted = request(port, f"/api/contents/{saved['id']}", token, "DELETE")
+        if status != 200 or not deleted.get("ok"):
+            raise RuntimeError("MCP smoke draft cleanup failed")
+        bridge.stdin.close()
+        bridge.wait(timeout=15)
+        if bridge.returncode != 0:
+            raise RuntimeError("Frozen MCP bridge did not close cleanly")
+    finally:
+        if bridge.poll() is None:
+            if os.name == "nt":
+                subprocess.run(["taskkill", "/PID", str(bridge.pid), "/T", "/F"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10, creationflags=subprocess.CREATE_NO_WINDOW, check=False)
+            else:
+                try:
+                    os.killpg(bridge.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+            if bridge.poll() is None:
+                bridge.kill()
+            bridge.wait(timeout=10)
+        if not bridge.stdin.closed:
+            bridge.stdin.close()
+        reader.join(timeout=2)
+        bridge.stdout.close()
+
+
 def verify(binary: Path, timeout: int, expected_version: str, clean_environment: bool = False) -> None:
     if not binary.is_file():
         raise RuntimeError("Embedded engine binary does not exist")
@@ -122,9 +207,10 @@ def verify(binary: Path, timeout: int, expected_version: str, clean_environment:
                     raise RuntimeError(f"State is missing its {field} list")
             if not state["platforms"] or state.get("runtime", {}).get("version") != expected_version:
                 raise RuntimeError("Platform catalog or engine version did not match")
-            bilibili = next((item for item in state["platforms"] if item.get("id") == "bilibili"), {})
-            if bilibili.get("kinds") != ["video"] or bilibili.get("modes") != ["publish"]:
-                raise RuntimeError("Frozen engine is missing the Bilibili video capability")
+            for platform_id in ("bilibili", "kuaishou"):
+                platform = next((item for item in state["platforms"] if item.get("id") == platform_id), {})
+                if platform.get("kinds") != ["video"] or platform.get("modes") != ["publish"]:
+                    raise RuntimeError(f"Frozen engine is missing the {platform_id} video capability")
             if token in json.dumps(state):
                 raise RuntimeError("Engine exposed its transport secret in public state")
             content = {
@@ -151,6 +237,8 @@ def verify(binary: Path, timeout: int, expected_version: str, clean_environment:
             # No session means no network request. This exercises the bundled
             # Bilibili adapter and its dependencies through the real worker.
             check_worker(binary, environment, Path(directory), "bilibili", "login_required")
+            check_worker(binary, environment, Path(directory), "kuaishou", "login_required")
+            check_mcp(binary, environment, Path(directory), port, token)
             status, _ = request(port, "/api/shutdown", token, "POST")
             if status != 200:
                 raise RuntimeError("Engine rejected graceful shutdown")
@@ -160,6 +248,8 @@ def verify(binary: Path, timeout: int, expected_version: str, clean_environment:
                 raise RuntimeError("Engine did not exit after graceful shutdown") from None
             if child.returncode != 0:
                 raise RuntimeError("Engine exited unsuccessfully")
+            if (Path(directory) / "mcp-endpoint.json").exists():
+                raise RuntimeError("Desktop shutdown left an active MCP descriptor")
         finally:
             if child.poll() is None:
                 if port and token:
@@ -173,14 +263,14 @@ def verify(binary: Path, timeout: int, expected_version: str, clean_environment:
                     child.kill()
                     child.wait(timeout=5)
             child.stdout.close()
-    print("Embedded engine smoke passed: startup, authentication, UTF-8 article save/delete, offline workers including Bilibili, graceful shutdown.")
+    print("Embedded engine smoke passed: startup, authentication, UTF-8 content, Bilibili/Kuaishou workers, stdio MCP and template preview, graceful shutdown.")
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("binary", type=Path)
     parser.add_argument("--timeout", type=int, default=120)
-    parser.add_argument("--expected-version", default="0.1.2")
+    parser.add_argument("--expected-version", default="0.1.3")
     parser.add_argument("--clean-environment", action="store_true", help="Use a minimal macOS application environment without developer runtime paths")
     args = parser.parse_args()
     try:

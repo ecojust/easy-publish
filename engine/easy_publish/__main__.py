@@ -15,7 +15,9 @@ from pathlib import Path
 def main():
     parser = argparse.ArgumentParser(description="Easy Publish local desktop engine")
     parser.add_argument("--data-dir", type=Path)
-    parser.add_argument("--worker", action="store_true")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--worker", action="store_true")
+    mode.add_argument("--mcp", action="store_true", help="Run the stdio MCP bridge to the already-running desktop")
     parser.add_argument("--parent-pid", type=int, help="Native host PID; stop when that host exits")
     args = parser.parse_args()
     if args.worker:
@@ -23,6 +25,9 @@ def main():
         return worker_main()
     if not args.data_dir:
         parser.error("--data-dir is required")
+    if args.mcp:
+        from easy_publish.mcp_server import mcp_main
+        return mcp_main(args.data_dir)
     if os.name != "nt":
         os.umask(0o077)
     data_dir = args.data_dir.expanduser().resolve()
@@ -40,7 +45,9 @@ def main():
     from easy_publish.app import create_app
     import uvicorn
     token = secrets.token_urlsafe(48)
-    app = create_app(data_dir, token)
+    mcp_token = secrets.token_urlsafe(48)
+    instance_id = secrets.token_urlsafe(32)
+    app = create_app(data_dir, token, mcp_token=mcp_token, instance_id=instance_id)
     config = uvicorn.Config(app, host="127.0.0.1", port=0, log_config=None, access_log=False, server_header=False)
     server = uvicorn.Server(config)
     app.state.exit_callback = lambda: setattr(server, "should_exit", True)
@@ -53,11 +60,14 @@ def main():
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         sock.bind(("127.0.0.1", 0))
         sock.listen(128)
-        # Only the native host reads this private stdout pipe. Never copy to logs.
-        print(json.dumps({"event": "ready", "port": sock.getsockname()[1], "token": token}), flush=True)
+        from easy_publish.mcp_connection import remove_endpoint, write_endpoint
         try:
+            write_endpoint(data_dir, sock.getsockname()[1], mcp_token, instance_id)
+            # Only the native host reads this private stdout pipe. Never copy to logs.
+            print(json.dumps({"event": "ready", "port": sock.getsockname()[1], "token": token}), flush=True)
             server.run(sockets=[sock])
         finally:
+            remove_endpoint(data_dir, instance_id)
             stopped.set()
             instance.close()
     return 0

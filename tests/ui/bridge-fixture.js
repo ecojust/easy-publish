@@ -10,6 +10,7 @@
     platform("dayu", "大鱼号", "#ed8b3c", ["article"], ["publish"], { fields: [{ key: "source", label: "信息来源", type: "select", required: true, kinds: ["article"], choices: [{ value: "无需标注", label: "无需标注" }, { value: "AI生成", label: "AI生成" }] }] }),
     platform("xueqiu", "雪球", "#488ecb", ["article"], ["publish"]),
     platform("douyin", "抖音", "#32374c", ["video"], ["publish"]),
+    platform("kuaishou", "快手", "#ff5000", ["video"], ["publish"], { titleLimit: 200, description: "浏览器登录；标题、描述与话题合计最多 500 字符（测试替身）" }),
     platform("xiaohongshu", "小红书", "#e8576f", ["video"], ["publish"]),
     platform("channels", "视频号", "#de9e4d", ["video"], ["publish", "draft"]),
     platform("bilibili", "哔哩哔哩", "#00a1d6", ["video"], ["publish"], { titleLimit: 80, fields: [
@@ -19,25 +20,48 @@
     ] }),
   ];
   const bilibiliCategories = [{ value: "101", label: "测试分区 / 科普" }, { value: "102", label: "测试分区 / 创作" }];
+  const articleTemplates = [
+    { id: "clean", name: "清爽蓝", description: "蓝色标题与留白，适合知识分享和日常文章", accent: "#2563eb" },
+    { id: "editorial", name: "墨色杂志", description: "衬线标题与细分隔线，适合观点和深度阅读", accent: "#9a3412" },
+    { id: "journal", name: "暖色手记", description: "暖色小标题与柔和引用，适合故事和生活记录", accent: "#b45309" },
+    { id: "tech", name: "理性科技", description: "青绿色层次与清晰代码块，适合技术和产品内容", accent: "#0f766e" },
+  ];
   const account = (id, platformId, label, status = "ready") => ({ id, platformId, label, status, message: status === "ready" ? "已连接（浏览器测试替身）" : "请连接测试账号", updatedAt: date, credentialConfigured: platformId === "wechat", ...(platformId === "bilibili" ? { bilibiliCategories: status === "ready" ? clone(bilibiliCategories) : [] } : {}) });
-  const draft = (id, kind, title, body) => ({ id, kind, title, body, description: "", tags: [], author: "", videoAssetId: null, coverAssetId: null, imageAssetIds: [], platformOptions: {}, createdAt: date, updatedAt: date, revision: 1 });
+  const draft = (id, kind, title, body) => ({ id, kind, title, body, description: "", tags: [], author: "", videoAssetId: null, coverAssetId: null, imageAssetIds: [], platformOptions: {}, articleTemplateId: "clean", platformPublicationStates: {}, createdAt: date, updatedAt: date, revision: 1 });
   const state = {
-    platforms,
-    accounts: [account("a-wechat", "wechat", "品牌公众号"), account("a-zhihu", "zhihu", "创作笔记"), account("a-dayu", "dayu", "创作工作室"), account("a-douyin", "douyin", "品牌抖音"), account("a-xhs", "xiaohongshu", "品牌小红书"), account("a-channels", "channels", "品牌视频号", "login_required"), account("a-bilibili", "bilibili", "品牌哔哩哔哩")],
+    platforms, articleTemplates,
+    accounts: [account("a-wechat", "wechat", "品牌公众号"), account("a-zhihu", "zhihu", "创作笔记"), account("a-dayu", "dayu", "创作工作室"), account("a-douyin", "douyin", "品牌抖音"), account("a-kuaishou", "kuaishou", "品牌快手"), account("a-xhs", "xiaohongshu", "品牌小红书"), account("a-channels", "channels", "品牌视频号", "login_required"), account("a-bilibili", "bilibili", "品牌哔哩哔哩")],
     contents: [draft("c-article", "article", "把创作的时间，还给创作", "## 少一点重复，多一点表达\n\n每一篇好内容，都值得被更多人看见。\n\n当文章写完、视频剪好，接下来的分享应该简单一些。\n\n### 这一次，专注内容本身\n\n- 在一个工作空间整理素材\n- 为不同平台选择合适的账号\n- 清楚了解每个目标的发布进度\n\n**一份创作，更多可能。**"), draft("c-article-2", "article", "从灵感到第一篇文章", "写下你的第一个想法。")],
     batches: [],
-    runtime: { browserReady: true, browserInstalling: false, browserMessage: "测试浏览器已就绪", vaultReady: true, vaultMessage: "测试凭据库已就绪", version: "0.1.2" },
+    runtime: { browserReady: true, browserInstalling: false, browserMessage: "测试浏览器已就绪", vaultReady: true, vaultMessage: "测试凭据库已就绪", version: "0.1.3" },
   };
   const assets = {};
   const calls = [];
   let failNextBatch = false;
   let preflightError = false;
   let nextFile = null;
+  const deferredLogins = new Set();
+  const finishLogin = (entry) => {
+    entry.status = "ready"; entry.message = "测试会话已连接";
+    if (entry.platformId === "bilibili") entry.bilibiliCategories = clone(bilibiliCategories);
+  };
   window.__fixture = {
     state, calls,
     failBatchOnce: () => { failNextBatch = true; },
     blockPreflight: (value) => { preflightError = value; },
     pick: (value) => { nextFile = value; },
+    deferLogin: (id) => { deferredLogins.add(id); },
+    loginProgress: (id, message) => {
+      const entry = state.accounts.find((item) => item.id === id);
+      if (entry?.status !== "logging_in") throw new Error("Fixture account must be logging in before progress updates.");
+      entry.message = message;
+    },
+    completeLogin: (id) => {
+      const entry = state.accounts.find((item) => item.id === id);
+      if (entry?.status !== "logging_in") throw new Error("Fixture account must be logging in before completion.");
+      deferredLogins.delete(id);
+      finishLogin(entry);
+    },
     seedTasks: () => {
       const statuses = ["queued", "running", "submitting", "draft_created", "submitted", "published", "needs_attention", "failed", "cancelled", "unknown"];
       state.batches = [{ id: "b-statuses", contentId: "c-article", title: "各目标回执状态测试", kind: "article", mode: "publish", createdAt: date, tasks: statuses.map((status) => ({ id: `t-${status}`, accountId: "a-zhihu", accountLabel: `测试 ${status}`, platformId: "zhihu", status, message: "页面状态验证替身", remoteId: null, url: null, canRetry: status === "failed" || status === "cancelled", startedAt: null, finishedAt: null })) }];
@@ -47,7 +71,25 @@
     async apiRequest(method, path, body) {
       // Keep method and payload for assertions; never print credential payloads.
       calls.push({ method, path, body: clone(body) });
-      if (method === "GET" && path === "/api/state") return clone(state);
+      if (method === "GET" && path === "/api/state") {
+        for (const content of state.contents) {
+          content.platformPublicationStates = {};
+          for (const batch of state.batches) if (batch.contentId === content.id && batch.mode === "publish") {
+            for (const task of batch.tasks) if (["submitted", "published", "unknown"].includes(task.status)) content.platformPublicationStates[task.platformId] = task.status;
+          }
+        }
+        return clone(state);
+      }
+      if (method === "POST" && path === "/api/preview/article") {
+        // UI protocol fixture only. Production uses the Python article renderer.
+        const template = articleTemplates.find((item) => item.id === body.articleTemplateId);
+        const html = await window.__renderMarkdownFixture(body.body);
+        const native = ["zhihu", "xueqiu"].includes(body.platformId);
+        return {
+          html: native ? html : `<section data-template="${template.id}" style="color:#334155;font-size:16px;line-height:1.85;border-top:3px solid ${template.accent};padding:18px 4px">${html}</section>`,
+          notes: [native ? "该平台使用原生字体和颜色，保留文章结构（测试回执）。" : "发布时会按所选平台的编辑器能力转换格式（测试回执）。"],
+        };
+      }
       if (method === "POST" && path === "/api/contents") {
         const content = { ...clone(body), id: crypto.randomUUID(), createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), revision: 1 };
         state.contents.push(content);
@@ -97,8 +139,9 @@
       }
       if (method === "POST" && (path.endsWith("/login") || path.endsWith("/check"))) {
         const account = state.accounts.find((entry) => entry.id === path.split("/")[3]);
-        account.status = "ready"; account.message = "测试会话已连接";
-        if (account.platformId === "bilibili") account.bilibiliCategories = clone(bilibiliCategories);
+        if (path.endsWith("/login") && deferredLogins.has(account.id)) {
+          account.status = "logging_in"; account.message = "等待扫码登录（测试进度）";
+        } else finishLogin(account);
         return { ok: true };
       }
       if (method === "DELETE" && path.startsWith("/api/accounts/")) { state.accounts = state.accounts.filter((item) => item.id !== path.split("/").pop()); return { ok: true }; }
@@ -107,6 +150,7 @@
     },
     async pickFile(kind) { calls.push({ method: "PICK", path: kind }); const value = nextFile; nextFile = null; return value; },
     async openExternal(url) { calls.push({ method: "OPEN", path: url }); },
+    async mcpConfiguration() { return { command: "/fixture/Easy Publish.app/Contents/MacOS/easy-publish-engine", args: ["--mcp", "--data-dir", "/fixture/Application Support/easy-publish"] }; },
   };
   window.easyPublish = bridge;
 })();

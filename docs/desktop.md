@@ -1,6 +1,6 @@
 # 桌面外壳与安装包
 
-Easy Publish 使用 Tauri 2 系统 WebView。macOS ARM、macOS Intel 与 Windows x64 分别构建原生安装包，版本为 `0.1.2`。macOS 最低为 13.5；Windows 为 Windows 10／11 x64。该下限匹配内置 Patchright 驱动的 [Node.js 24 系统要求](https://github.com/nodejs/node/blob/v24.13.0/BUILDING.md#platform-list)。Python 3.12 发布引擎由 PyInstaller 打包并随应用安装，用户无需安装 Python。发布浏览器由引擎管理，首次使用在应用中准备。
+Easy Publish 使用 Tauri 2 系统 WebView。macOS ARM、macOS Intel 与 Windows x64 分别构建原生安装包，版本为 `0.1.3`。macOS 最低为 13.5；Windows 为 Windows 10／11 x64。该下限匹配内置 Patchright 驱动的 [Node.js 24 系统要求](https://github.com/nodejs/node/blob/v24.13.0/BUILDING.md#platform-list)。Python 3.12 发布引擎由 PyInstaller 打包并随应用安装，用户无需安装 Python。发布浏览器由引擎管理，首次使用在应用中准备。
 
 ## 开发
 
@@ -38,7 +38,7 @@ macOS 使用 ad-hoc 签名并验证 bundle 完整性；此签名方式关闭 Har
 
 Rust 宿主读取引擎的单行启动握手，保存随机端口和 token，不将 token 交给 WebView 或写入日志。引擎仅监听本机；宿主禁用 HTTP 代理和重定向。接口方法、路径与 ID 都经白名单匹配，renderer 无法调用退出接口。JSON 请求最大 4 MiB、响应最大 16 MiB。
 
-文件导入必须使用本次运行中原生文件选择器选中的路径。平台链接只接受允许域名的 HTTPS 地址；WebView 不允许导航至外部网页或打开新窗口。宿主仅暴露 `api_request`、`pick_file`、`open_external`，不暴露任意 shell 或文件读取 API。
+文件导入必须使用本次运行中原生文件选择器选中的路径。平台链接只接受允许域名的 HTTPS 地址；WebView 不允许导航至外部网页或打开新窗口。宿主仅暴露 `api_request`、`pick_file`、`open_external`、`mcp_configuration`，不暴露任意 shell 或文件读取 API。
 
 重复启动应用时聚焦已有窗口，避免同一数据目录运行多个宿主。正常退出先请求引擎关闭任务，再结束宿主拥有的引擎进程；任务、浏览器进程与会话清理由引擎负责。测试密钥相关环境变量在 release 启动时清除。
 
@@ -52,3 +52,5 @@ cargo fmt --manifest-path src-tauri/Cargo.toml --check
 以上核心测试不需要图形库，覆盖 API 白名单、平台链接、导航、HTTP 认证、拒绝重定向、token 脱敏和任意文件读取限制。完整桌面编译仍需要目标平台的 Tauri 系统依赖。
 
 启动失败时，宿主仅保留最多 16 KiB 的启动 stderr，在应用数据目录 `logs/engine-startup.log` 中记录退出结果和加载错误；弹窗显示退出结果与日志路径。stdout 握手从不写入日志，涉及凭据的诊断行和用户主目录会脱敏，引擎就绪后停止保留 stderr。
+
+设置页提供本机 MCP 配置，复用打包内的引擎 `--mcp` 入口，配置不含连接 token。MCP 客户端需要与桌面应用以同一系统用户运行，应用保持打开；详见 [MCP 接入说明](mcp.md)。安装包 smoke 同时验证标准 stdio 初始化、工具发现、与桌面共享内容库及文章模板预览，不调用真实平台发布。

@@ -40,6 +40,7 @@ class Store:
         CREATE TABLE IF NOT EXISTS batches(id TEXT PRIMARY KEY, request_id TEXT UNIQUE NOT NULL, content_id TEXT NOT NULL, title TEXT NOT NULL, kind TEXT NOT NULL, mode TEXT NOT NULL, created TEXT NOT NULL, snapshot TEXT NOT NULL, selection TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS tasks(id TEXT PRIMARY KEY, batch_id TEXT NOT NULL, account_id TEXT NOT NULL, account_label TEXT NOT NULL, platform TEXT NOT NULL, status TEXT NOT NULL, message TEXT NOT NULL, remote_id TEXT, url TEXT, fence INTEGER NOT NULL DEFAULT 0, started TEXT, finished TEXT);
         CREATE INDEX IF NOT EXISTS tasks_batch ON tasks(batch_id);
+        CREATE INDEX IF NOT EXISTS batches_content ON batches(content_id);
         PRAGMA user_version=2;
         """)
         self.db.commit()
@@ -73,10 +74,21 @@ class Store:
             db.execute("UPDATE accounts SET status='login_required',message='上次登录已中断，请重新连接',updated=? WHERE status='logging_in'", (now(),))
             db.execute("DELETE FROM account_metadata WHERE account_id NOT IN (SELECT id FROM accounts WHERE platform='bilibili' AND status='ready')")
 
-    @staticmethod
-    def content(row):
-        return {**json.loads(row["data"]), "id": row["id"], "createdAt": row["created"],
-                "updatedAt": row["updated"], "revision": row["revision"]}
+    def content(self, row):
+        data = json.loads(row["data"])
+        data.setdefault("articleTemplateId", "clean")
+        return {**data, "id": row["id"], "createdAt": row["created"],
+                "updatedAt": row["updated"], "revision": row["revision"],
+                "platformPublicationStates": self.publication_states(row["id"])}
+
+    def publication_states(self, content_id):
+        # Include all history, even when the state UI shows only the newest 200
+        # batches. Failed tasks and remote drafts do not erase earlier receipts.
+        rows = self.all("""SELECT tasks.platform,tasks.status FROM tasks JOIN batches
+                        ON batches.id=tasks.batch_id WHERE batches.content_id=?
+                        AND tasks.status IN ('submitted','published','unknown')
+                        ORDER BY tasks.rowid""", (content_id,))
+        return {row["platform"]: row["status"] for row in rows}
 
     def account_categories(self, identifier):
         row = self.one("SELECT bilibili_categories FROM account_metadata WHERE account_id=?", (identifier,))

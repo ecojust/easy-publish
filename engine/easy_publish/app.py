@@ -12,7 +12,8 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
-from easy_publish.content import ContentInput, import_asset, preview_asset
+from easy_publish.content import ContentInput, import_asset, preview_asset, render_article
+from easy_publish.catalog import BY_ID
 from easy_publish.service import Problem, Service
 
 
@@ -41,7 +42,18 @@ class BatchInput(Selection):
     requestId: UUID
 
 
-def create_app(data_dir: Path, token: str, runtime=None):
+class ArticlePreviewInput(Input):
+    body: str = Field(default="", max_length=500_000)
+    articleTemplateId: Literal["clean", "editorial", "journal", "tech"] = "clean"
+    platformId: str | None = Field(default=None, max_length=40)
+
+
+class McpCallInput(Input):
+    name: str = Field(min_length=1, max_length=80)
+    arguments: dict = Field(default_factory=dict)
+
+
+def create_app(data_dir: Path, token: str, runtime=None, *, mcp_token: str | None = None, instance_id: str | None = None):
     if runtime is None:
         from easy_publish.runtime import Runtime
         runtime = Runtime(data_dir)
@@ -58,12 +70,18 @@ def create_app(data_dir: Path, token: str, runtime=None):
     app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
     app.state.service = service
     app.state.exit_callback = None
+    app.state.mcp_instance_id = instance_id
 
     @app.middleware("http")
     async def local_auth(request: Request, call_next):
-        expected = "Bearer " + token
+        selected_token = mcp_token if request.url.path == "/api/mcp/call" else token
+        if not selected_token:
+            return JSONResponse({"error": "MCP 本地连接不可用", "code": "unauthorized"}, status_code=401)
+        expected = "Bearer " + selected_token
         if not secrets.compare_digest(request.headers.get("authorization", "").encode("utf-8"), expected.encode("ascii")):
             return JSONResponse({"error": "无效的本地会话", "code": "unauthorized"}, status_code=401)
+        if request.url.path == "/api/mcp/call" and instance_id and not secrets.compare_digest(request.headers.get("x-easy-publish-instance", "").encode("utf-8"), instance_id.encode("utf-8")):
+            return JSONResponse({"error": "MCP 连接已失效，请重新连接", "code": "unauthorized"}, status_code=401)
         if request.headers.get("origin"):
             return JSONResponse({"error": "请通过桌面应用访问", "code": "origin_denied"}, status_code=403)
         try:
@@ -90,6 +108,19 @@ def create_app(data_dir: Path, token: str, runtime=None):
     @app.get("/api/state")
     async def state():
         return service.state()
+
+    @app.post("/api/preview/article")
+    async def preview_article(value: ArticlePreviewInput):
+        from .article_templates import article_format_notes
+        if value.platformId is not None and (value.platformId not in BY_ID or "article" not in BY_ID[value.platformId]["kinds"]):
+            raise Problem("请选择支持文章的平台")
+        return {"html": render_article(value.body, value.articleTemplateId, value.platformId),
+                "notes": article_format_notes(value.platformId)}
+
+    @app.post("/api/mcp/call")
+    async def mcp_call(value: McpCallInput):
+        from .mcp_server import execute_tool
+        return await execute_tool(service, data_dir, value.name, value.arguments)
 
     @app.post("/api/contents")
     async def add_content(content: ContentInput):

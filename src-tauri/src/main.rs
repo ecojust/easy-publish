@@ -1,7 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use easy_publish_desktop::{
-    engine::Engine,
+    engine::{Engine, McpConfiguration},
     policy::{allowed_external_url, allowed_navigation, PublicError},
 };
 use serde_json::Value;
@@ -20,6 +20,14 @@ async fn api_request(
     body: Option<Value>,
 ) -> Result<Value, PublicError> {
     engine.request(&method, &path, body).await
+}
+
+#[tauri::command]
+fn mcp_configuration(app: tauri::AppHandle) -> Result<McpConfiguration, PublicError> {
+    let data_dir = app.path().app_data_dir().map_err(|_| {
+        PublicError::new("data_directory", "无法定位应用数据目录，请重新启动应用。")
+    })?;
+    easy_publish_desktop::engine::mcp_configuration(&data_dir)
 }
 
 #[tauri::command]
@@ -119,6 +127,7 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             api_request,
+            mcp_configuration,
             pick_file,
             open_external
         ])

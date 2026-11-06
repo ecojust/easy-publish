@@ -27,7 +27,7 @@ class Site:
 
 SITES = {
     "douyin": Site("抖音", "https://creator.douyin.com/creator-micro/content/upload", "creator.douyin.com", 'input.upload-btn-input, div[class^="container"] input[type="file"]', 30),
-    "xiaohongshu": Site("小红书", "https://creator.xiaohongshu.com/publish/publish?from=homepage&target=video", "creator.xiaohongshu.com", 'div[class^="upload-content"] input.upload-input', 20),
+    "xiaohongshu": Site("小红书", "https://creator.xiaohongshu.com/publish/publish?from=homepage&target=video", "creator.xiaohongshu.com", 'div[class^="upload-content"] input.upload-input, div.cover-container > input.upload-input[accept*=".mp4"]', 20),
     "channels": Site("视频号", "https://channels.weixin.qq.com/platform", "channels.weixin.qq.com", 'input[type="file"]', 15),
 }
 ALIASES = {"tencent": "channels", "wechat_channels": "channels", "xhs": "xiaohongshu"}
@@ -35,6 +35,181 @@ VIDEO_EXTENSIONS = {".mp4", ".mov", ".m4v", ".avi", ".mkv", ".webm"}
 UPLOAD_SECONDS = 20 * 60
 LOGIN_SECONDS = 10 * 60
 CONFIRM_SECONDS = 60
+DOUYIN_USER_INFO = "/aweme/v1/creator/pc/user/info/"
+DOUYIN_VERIFY_SECONDS = 30
+
+
+class LoginPageError(Exception):
+    """A fixed, non-secret message that the user can act on."""
+
+
+class VideoStageError(Exception):
+    """An authored stage-specific message, without platform data or secrets."""
+
+
+# The public XHS video editor renders these mutually exclusive siblings of its
+# file input for Uploading/Analyze, Transcoding, Preview, Fail and Cancel. Only
+# Preview is ready; a title field, enabled publish button or 100% is not proof.
+# See VIDEO_SOURCES.md for the pinned adapter and current public bundle source.
+_XHS_UPLOAD_STATE = """({selector, filename}) => {
+    const visible = el => !!el && !!el.getClientRects().length &&
+        getComputedStyle(el).visibility !== 'hidden';
+    const shown = selector => Array.from(document.querySelectorAll(selector)).some(visible);
+    if (shown('div[class*="login-box"], input[placeholder*="验证码"]') ||
+        Array.from(document.querySelectorAll('[role="dialog"]')).some(el =>
+            visible(el) && /安全验证|登录验证|扫码登录/.test(el.textContent))) {
+        return {state: 'auth'};
+    }
+    const roots = Array.from(document.querySelectorAll(selector)).map(el => el.parentElement);
+    for (const root of roots) {
+        const child = name => Array.from(root.children).find(el => el.matches(name) && visible(el));
+        if (child('.fail')) return {state: 'failed'};
+        const uploading = child('.uploading');
+        if (uploading) {
+            const match = uploading.textContent.match(/上传中\\s*(\\d{1,3})%/);
+            return {state: 'uploading', percent: match ? Math.min(100, Number(match[1])) : null};
+        }
+        if (child('.transcoding')) return {state: 'processing'};
+        const preview = child('.preview-new');
+        if (preview) {
+            const name = preview.querySelector('.name');
+            return {state: name && name.textContent.trim() === filename ? 'ready' : 'other_video'};
+        }
+        if (child('.canceled') || Array.from(root.querySelectorAll('.canceled')).some(visible)) {
+            return {state: 'idle'};
+        }
+    }
+    return {state: 'pending'};
+}"""
+
+
+async def _xhs_upload_state(page, filename: str) -> dict:
+    if page.is_closed():
+        raise VideoStageError("小红书视频上传期间浏览器已关闭；尚未点击发布，请先核对平台草稿")
+    try:
+        parsed = urlsplit(page.url)
+        if parsed.scheme != "https" or parsed.hostname != SITES["xiaohongshu"].host or parsed.port not in {None, 443}:
+            raise VideoStageError("小红书视频上传页面已离开创作中心；尚未点击发布，请先核对平台草稿")
+        if any(part in parsed.path for part in ("login", "signin")):
+            raise VideoStageError("小红书视频上传期间登录已失效；尚未点击发布，请重新连接账号并核对平台草稿")
+        if parsed.path.rstrip("/") != "/publish/publish":
+            raise VideoStageError("小红书视频上传页面已切换；尚未点击发布，请先核对平台草稿")
+        state = await page.evaluate(_XHS_UPLOAD_STATE, {"selector": SITES["xiaohongshu"].upload, "filename": filename})
+    except VideoStageError:
+        raise
+    except Exception:
+        if page.is_closed():
+            raise VideoStageError("小红书视频上传期间浏览器已关闭；尚未点击发布，请先核对平台草稿") from None
+        raise VideoStageError("无法读取小红书视频上传进度；尚未点击发布，请先核对平台草稿和网络") from None
+    if state.get("state") == "auth":
+        raise VideoStageError("小红书视频上传期间需要重新登录或安全验证；尚未点击发布，请完成验证并核对平台草稿")
+    return state
+
+
+async def _xhs_wait_upload(page, filename: str, ctx: ProviderContext, *, seconds: float = UPLOAD_SECONDS) -> None:
+    """Keep the browser open through upload and processing, before editing.
+
+    The caller first rejects an existing preview, then selects the file once.
+    Matching the preview filename prevents an unrelated video from satisfying
+    this wait. The durable upload fence remains in force for every failure.
+    """
+    last_message = ""
+    seen_active = False
+    try:
+        async with asyncio.timeout(seconds):
+            while True:
+                state = await _xhs_upload_state(page, filename)
+                phase = state["state"]
+                if phase == "ready":
+                    ctx.progress("小红书视频上传及处理完成，正在填写发布信息")
+                    return
+                if phase == "failed":
+                    raise VideoStageError("小红书页面显示视频上传失败；尚未点击发布，请检查视频格式、大小和网络，并先核对平台草稿")
+                if phase == "other_video":
+                    raise VideoStageError("小红书页面的视频与本次文件不一致；尚未点击发布，请先核对平台草稿")
+                if phase == "idle" and seen_active:
+                    raise VideoStageError("小红书视频上传已取消；尚未点击发布，请先核对平台草稿")
+                seen_active = seen_active or phase in {"uploading", "processing"}
+                if phase == "processing":
+                    message = "小红书视频已传输，等待平台转码处理完成"
+                elif phase == "uploading" and state.get("percent") is not None:
+                    message = f"小红书视频上传中：{state['percent']}%，请保持发布窗口打开"
+                else:
+                    message = "等待小红书确认视频上传完成，请保持发布窗口打开"
+                if message != last_message:
+                    ctx.progress(message)
+                    last_message = message
+                await asyncio.sleep(1)
+    except TimeoutError:
+        raise VideoStageError("等待小红书视频上传及处理超过 20 分钟；尚未点击发布，请检查网络并先核对平台草稿") from None
+
+
+def _douyin_creator_page(page) -> bool:
+    try:
+        parsed = urlsplit(page.url)
+        return parsed.scheme == "https" and parsed.hostname == SITES["douyin"].host and parsed.port in {None, 443} and parsed.path.startswith("/creator-micro/")
+    except ValueError:
+        return False
+
+
+async def _douyin_challenge(page) -> bool:
+    for marker in ("扫码登录", "手机号登录", "二维码失效", "登录验证", "安全验证"):
+        if await _visible(page.get_by_text(marker, exact=True)):
+            return True
+    if await _visible(page.get_by_role("img", name="二维码", exact=True)):
+        return True
+    return await _visible(page.locator('input[placeholder*="验证码"], input[placeholder*="短信"]'))
+
+
+async def _douyin_account_ready(page) -> bool:
+    """Verify the current browser session, independently of the upload widget.
+
+    The public creator app calls this read-only endpoint and requires a uid
+    with status_code 0. QR login can land on /creator-micro/home, where there
+    is no video file input. Never infer authentication from the route alone.
+    """
+    if not _douyin_creator_page(page) or await _douyin_challenge(page):
+        return False
+    original_url = page.url
+    navigated = False
+
+    def on_navigation(frame):
+        nonlocal navigated
+        if frame == page.main_frame:
+            navigated = True
+
+    page.on("framenavigated", on_navigation)
+    try:
+        # Run inside the actual creator page so the browser retains its normal
+        # cookie/security context. Only a boolean crosses back into Python;
+        # account details and raw responses never enter progress or logs.
+        async with asyncio.timeout(6):
+            confirmed = await page.evaluate("""async (path) => {
+                const controller = new AbortController();
+                const timer = setTimeout(() => controller.abort(), 5000);
+                try {
+                    const response = await fetch(path, {
+                        method: 'GET', credentials: 'include', redirect: 'error',
+                        cache: 'no-store', signal: controller.signal
+                    });
+                    if (!response.ok || new URL(response.url).origin !== location.origin) return false;
+                    const text = await response.text();
+                    if (text.length > 1024 * 1024) return false;
+                    const value = JSON.parse(text);
+                    return value.status_code === 0 && (
+                        (typeof value.uid === 'string' && /^[1-9][0-9]*$/.test(value.uid)) ||
+                        (typeof value.uid === 'number' && Number.isInteger(value.uid) && value.uid > 0)
+                    );
+                } catch (_) { return false; }
+                finally { clearTimeout(timer); }
+            }""", DOUYIN_USER_INFO)
+    except Exception:
+        return False
+    finally:
+        page.remove_listener("framenavigated", on_navigation)
+    # A response from a previous navigation/account must not confirm the page
+    # that replaced it. A visible second-factor prompt still requires the user.
+    return confirmed is True and not navigated and not page.is_closed() and page.url == original_url and _douyin_creator_page(page) and not await _douyin_challenge(page)
 
 
 def _platform(payload: PublishPayload) -> str:
@@ -71,6 +246,8 @@ async def _visible(locator) -> bool:
 
 
 async def _logged_in(page, platform: str) -> bool:
+    if platform == "douyin":
+        return await _douyin_account_ready(page)
     site = SITES[platform]
     parsed = urlsplit(page.url)
     if parsed.hostname != site.host or any(part in parsed.path for part in ("login", "signin")):
@@ -78,11 +255,6 @@ async def _logged_in(page, platform: str) -> bool:
     for frame in page.frames:
         if "open.weixin.qq.com/connect/qrconnect" in frame.url:
             return False
-    if platform == "douyin":
-        for marker in ("扫码登录", "手机号登录"):
-            if await _visible(page.get_by_text(marker, exact=True)):
-                return False
-        return bool(await page.locator(site.upload).count())
     if platform == "xiaohongshu":
         if await _visible(page.locator('div[class*="login-box"]')):
             return False
@@ -90,10 +262,60 @@ async def _logged_in(page, platform: str) -> bool:
     return await _visible(page.locator("button.weui-desktop-btn").filter(has_text="发表视频"))
 
 
-async def _wait_login(page, platform: str, seconds: float) -> None:
+async def _wait_login(page, platform: str, seconds: float, ctx: ProviderContext | None = None):
+    unconfirmed_since = None
+    last_message = ""
     async with asyncio.timeout(seconds):
-        while not await _logged_in(page, platform):
+        while True:
+            # QR/login flows can open a new creator tab. It belongs to the
+            # same isolated account context; unrelated windows are not used.
+            pages = list(reversed(page.context.pages)) if platform == "douyin" else [page]
+            pages = [candidate for candidate in pages if not candidate.is_closed()]
+            if not pages:
+                raise LoginPageError("登录浏览器已关闭，请重新连接账号")
+            creator_seen = False
+            challenge_seen = False
+            for candidate in pages:
+                if platform == "douyin":
+                    if not _douyin_creator_page(candidate):
+                        continue
+                    creator_seen = True
+                    if await _douyin_challenge(candidate):
+                        challenge_seen = True
+                        continue
+                if await _logged_in(candidate, platform):
+                    return candidate
+            if platform == "douyin":
+                message = ""
+                if challenge_seen:
+                    message = "请在抖音浏览器中完成扫码确认、短信或安全验证"
+                    unconfirmed_since = None
+                elif creator_seen:
+                    message = "已进入抖音创作者中心，正在确认账号登录状态"
+                    unconfirmed_since = unconfirmed_since or asyncio.get_running_loop().time()
+                    if asyncio.get_running_loop().time() - unconfirmed_since >= DOUYIN_VERIFY_SECONDS:
+                        raise LoginPageError("已进入抖音创作者中心，但账号状态接口未能确认登录；请在浏览器中检查网络及平台验证后重新连接")
+                else:
+                    unconfirmed_since = None
+                if ctx and message and message != last_message:
+                    ctx.progress(message)
+                    last_message = message
             await asyncio.sleep(1)
+
+
+async def _douyin_upload_page(page, ctx: ProviderContext) -> None:
+    """Only publishing needs a ready upload control; account login does not."""
+    ctx.progress("已确认抖音登录，正在打开视频上传入口")
+    try:
+        if urlsplit(page.url).path.rstrip("/") != "/creator-micro/content/upload":
+            await page.goto(SITES["douyin"].url, wait_until="domcontentloaded", timeout=60_000)
+        await page.locator(SITES["douyin"].upload).first.wait_for(state="attached", timeout=45_000)
+        if not _douyin_creator_page(page) or urlsplit(page.url).path.rstrip("/") != "/creator-micro/content/upload" or await _douyin_challenge(page):
+            raise LoginPageError("抖音上传入口仍需登录或平台验证，请在创作中心完成后重试")
+    except LoginPageError:
+        raise
+    except Exception:
+        raise LoginPageError("抖音账号已登录，但未找到视频上传入口；请检查账号投稿权限或平台页面后重试") from None
 
 
 async def login(payload: PublishPayload, ctx: ProviderContext) -> ProviderResult:
@@ -105,12 +327,15 @@ async def login(payload: PublishPayload, ctx: ProviderContext) -> ProviderResult
     try:
         async with _browser_page(ctx, load_session=False) as (context, page):
             await page.goto(site.url, wait_until="domcontentloaded", timeout=60_000)
-            await _wait_login(page, platform, LOGIN_SECONDS)
+            await _wait_login(page, platform, LOGIN_SECONDS, ctx)
+            ctx.progress(f"已确认{site.label}登录，正在保存加密会话")
             ctx.session_path.parent.mkdir(parents=True, exist_ok=True)
             await context.storage_state(path=str(ctx.session_path))
         return ProviderResult("ready", f"{site.label}登录会话已保存")
     except TimeoutError:
         return ProviderResult("needs_attention", "等待登录超时，请重新打开登录浏览器并完成验证")
+    except LoginPageError as exc:
+        return ProviderResult("needs_attention", str(exc))
     except Exception:
         return ProviderResult("needs_attention", "无法完成登录，请检查网络、发布浏览器及平台页面后重试")
 
@@ -125,11 +350,13 @@ async def check(payload: PublishPayload, ctx: ProviderContext) -> ProviderResult
         async with _browser_page(ctx) as (context, page):
             await page.goto(SITES[platform].url, wait_until="domcontentloaded", timeout=60_000)
             try:
-                await _wait_login(page, platform, 25)
+                await _wait_login(page, platform, 25, ctx)
             except TimeoutError:
                 return ProviderResult("login_required", "尚未确认有效登录，请重新登录并完成平台验证")
             await context.storage_state(path=str(ctx.session_path))
-        return ProviderResult("ready", "已确认当前账号可访问发布入口")
+        return ProviderResult("ready", "已确认抖音账号登录有效" if platform == "douyin" else "已确认当前账号可访问发布入口")
+    except LoginPageError as exc:
+        return ProviderResult("needs_attention", str(exc))
     except Exception:
         return ProviderResult("needs_attention", "账号检查未完成，请检查网络或浏览器后重试")
 
@@ -222,10 +449,19 @@ async def _prepare(page, platform: str, payload: PublishPayload, ctx: ProviderCo
                 await asyncio.sleep(1)
     upload = frame.locator(site.upload).first
     await upload.wait_for(state="attached", timeout=60_000)
+    if platform == "xiaohongshu":
+        state = await _xhs_upload_state(page, payload.video_path.name)
+        if state["state"] not in {"pending", "idle"}:
+            raise VideoStageError("小红书编辑器已有视频或上传任务；尚未选择本次文件，请先核对平台草稿后重新打开发布页")
     # Uploading creates platform-side media/drafts; persist the fence first.
     if platform != "channels":
         ctx.submitting("正在上传视频；中断后请先核对平台草稿和作品，避免重复上传")
-    await upload.set_input_files(str(payload.video_path))
+    try:
+        await upload.set_input_files(str(payload.video_path))
+    except Exception:
+        if platform == "xiaohongshu":
+            raise VideoStageError("小红书开始上传视频时中断；尚未点击发布，请先核对平台草稿和网络") from None
+        raise
     ctx.progress("视频上传中，等待平台处理并填写信息")
     if platform == "douyin":
         title = page.locator('input[placeholder*="填写作品标题"]').first
@@ -240,17 +476,25 @@ async def _prepare(page, platform: str, payload: PublishPayload, ctx: ProviderCo
         await page.locator('[class^="long-card"] div:has-text("重新上传")').first.wait_for(state="visible", timeout=UPLOAD_SECONDS * 1000)
         return page.get_by_role("button", name="发布", exact=True).first
     if platform == "xiaohongshu":
-        title = page.locator('input[placeholder*="填写标题"]').first
-        await title.wait_for(state="visible", timeout=UPLOAD_SECONDS * 1000)
-        await title.fill(payload.title)
-        editor = page.locator('p[data-placeholder*="输入正文描述"]').first
-        await _fill_editor(page, editor, payload.description)
-        for tag in payload.tags:
-            await page.keyboard.insert_text("#" + tag)
-            item = page.locator("#creator-editor-topic-container .item").filter(has_text=tag).first
-            await item.click(timeout=10_000)
-        if payload.cover_path:
-            await _xhs_cover(page, payload.cover_path)
+        await _xhs_wait_upload(page, payload.video_path.name, ctx)
+        stage = "标题"
+        try:
+            title = page.locator('input[placeholder*="填写标题"]').first
+            await title.wait_for(state="visible", timeout=45_000)
+            await title.fill(payload.title)
+            stage = "正文"
+            editor = page.locator('p[data-placeholder*="输入正文描述"]').first
+            await _fill_editor(page, editor, payload.description)
+            stage = "话题"
+            for tag in payload.tags:
+                await page.keyboard.insert_text("#" + tag)
+                item = page.locator("#creator-editor-topic-container .item").filter(has_text=tag).first
+                await item.click(timeout=10_000)
+            if payload.cover_path:
+                stage = "封面"
+                await _xhs_cover(page, payload.cover_path)
+        except Exception:
+            raise VideoStageError(f"小红书视频已上传，但填写{stage}未完成；尚未点击发布，请先核对平台草稿及页面提示") from None
         return page.get_by_role("button", name="发布", exact=True).first
     verification = frame.locator("div.weui-desktop-dialog__wrp:visible").filter(has_text="实名验证").first
     if await _visible(verification):
@@ -337,9 +581,11 @@ async def publish(payload: PublishPayload, ctx: ProviderContext) -> ProviderResu
         async with _browser_page(ctx) as (context, page):
             await page.goto(SITES[platform].url, wait_until="domcontentloaded", timeout=60_000)
             try:
-                await _wait_login(page, platform, 25)
+                page = await _wait_login(page, platform, 25, ctx)
             except TimeoutError:
                 return ProviderResult("login_required", "请重新登录并完成平台验证后发布")
+            if platform == "douyin":
+                await _douyin_upload_page(page, ctx)
             async with asyncio.timeout(UPLOAD_SECONDS + LOGIN_SECONDS + CONFIRM_SECONDS):
                 button = await _prepare(page, platform, payload, guarded_ctx)
                 result = await _submit_once(page, button, platform, payload, guarded_ctx)
@@ -350,6 +596,12 @@ async def publish(payload: PublishPayload, ctx: ProviderContext) -> ProviderResu
             return result
     except asyncio.CancelledError:
         raise
+    except VideoStageError as exc:
+        return ProviderResult("unknown" if mutated else "needs_attention", str(exc), url=SITES[platform].url)
+    except LoginPageError as exc:
+        if mutated:
+            return ProviderResult("unknown", "上传或编辑已开始，登录状态随后发生变化；请先在平台核对草稿及作品", url=SITES[platform].url)
+        return ProviderResult("needs_attention", str(exc))
     except Exception:
         if mutated:
             return ProviderResult("unknown", "上传或编辑已开始，但流程未获得明确结果；请在平台核对草稿及作品后处理", url=SITES[platform].url)

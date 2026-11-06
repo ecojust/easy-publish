@@ -5,11 +5,10 @@ import shutil
 from pathlib import Path
 from typing import Literal
 
-import bleach
-from markdown_it import MarkdownIt
 from PIL import Image
 from pydantic import BaseModel, ConfigDict, Field
 
+from easy_publish.article_templates import ArticleTemplateId, render_article
 from easy_publish.store import uid
 
 
@@ -25,14 +24,7 @@ class ContentInput(BaseModel):
     coverAssetId: str | None = None
     imageAssetIds: list[str] = Field(default_factory=list, max_length=100)
     platformOptions: dict[str, dict[str, str]] = Field(default_factory=dict)
-
-
-def render_article(body: str) -> str:
-    raw = MarkdownIt("commonmark", {"html": False, "breaks": True}).render(body)
-    return bleach.clean(raw, tags={"p", "br", "h1", "h2", "h3", "h4", "blockquote", "pre", "code",
-                                   "strong", "em", "s", "ul", "ol", "li", "a", "img", "hr", "table", "thead", "tbody", "tr", "td", "th"},
-                        attributes={"a": ["href", "title"], "img": ["src", "alt", "title"]},
-                        protocols={"https", "http", "easy-asset"}, strip=True)
+    articleTemplateId: ArticleTemplateId = "clean"
 
 
 def image_sources(rendered: str) -> list[str]:
