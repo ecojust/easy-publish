@@ -9,6 +9,8 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
+from .catalog import bilibili_categories
+
 
 def now():
     return datetime.now(timezone.utc).isoformat(timespec="milliseconds")
@@ -34,10 +36,11 @@ class Store:
         CREATE TABLE IF NOT EXISTS contents(id TEXT PRIMARY KEY, data TEXT NOT NULL, created TEXT NOT NULL, updated TEXT NOT NULL, revision INTEGER NOT NULL);
         CREATE TABLE IF NOT EXISTS assets(id TEXT PRIMARY KEY, name TEXT NOT NULL, kind TEXT NOT NULL, size INTEGER NOT NULL, mime TEXT NOT NULL, path TEXT NOT NULL, text TEXT);
         CREATE TABLE IF NOT EXISTS accounts(id TEXT PRIMARY KEY, platform TEXT NOT NULL, label TEXT NOT NULL, status TEXT NOT NULL, message TEXT NOT NULL, updated TEXT NOT NULL, configured INTEGER NOT NULL);
+        CREATE TABLE IF NOT EXISTS account_metadata(account_id TEXT PRIMARY KEY, bilibili_categories TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS batches(id TEXT PRIMARY KEY, request_id TEXT UNIQUE NOT NULL, content_id TEXT NOT NULL, title TEXT NOT NULL, kind TEXT NOT NULL, mode TEXT NOT NULL, created TEXT NOT NULL, snapshot TEXT NOT NULL, selection TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS tasks(id TEXT PRIMARY KEY, batch_id TEXT NOT NULL, account_id TEXT NOT NULL, account_label TEXT NOT NULL, platform TEXT NOT NULL, status TEXT NOT NULL, message TEXT NOT NULL, remote_id TEXT, url TEXT, fence INTEGER NOT NULL DEFAULT 0, started TEXT, finished TEXT);
         CREATE INDEX IF NOT EXISTS tasks_batch ON tasks(batch_id);
-        PRAGMA user_version=1;
+        PRAGMA user_version=2;
         """)
         self.db.commit()
 
@@ -68,17 +71,27 @@ class Store:
         with self.transaction() as db:
             db.execute("UPDATE tasks SET status=CASE WHEN fence=1 THEN 'unknown' ELSE 'cancelled' END, message=CASE WHEN fence=1 THEN '上次退出时正在提交，请先到平台核对结果' ELSE '应用已退出，任务未继续发布' END, finished=? WHERE status IN ('queued','running','submitting')", (now(),))
             db.execute("UPDATE accounts SET status='login_required',message='上次登录已中断，请重新连接',updated=? WHERE status='logging_in'", (now(),))
+            db.execute("DELETE FROM account_metadata WHERE account_id NOT IN (SELECT id FROM accounts WHERE platform='bilibili' AND status='ready')")
 
     @staticmethod
     def content(row):
         return {**json.loads(row["data"]), "id": row["id"], "createdAt": row["created"],
                 "updatedAt": row["updated"], "revision": row["revision"]}
 
-    @staticmethod
-    def account(row):
-        return {"id": row["id"], "platformId": row["platform"], "label": row["label"],
+    def account_categories(self, identifier):
+        row = self.one("SELECT bilibili_categories FROM account_metadata WHERE account_id=?", (identifier,))
+        try:
+            return bilibili_categories(json.loads(row["bilibili_categories"])) if row else []
+        except (TypeError, ValueError):
+            return []
+
+    def account(self, row):
+        result = {"id": row["id"], "platformId": row["platform"], "label": row["label"],
                 "status": row["status"], "message": row["message"], "updatedAt": row["updated"],
                 "credentialConfigured": bool(row["configured"])}
+        if row["platform"] == "bilibili":
+            result["bilibiliCategories"] = self.account_categories(row["id"]) if row["status"] == "ready" else []
+        return result
 
     @staticmethod
     def asset(row):

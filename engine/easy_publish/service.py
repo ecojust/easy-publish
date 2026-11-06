@@ -7,7 +7,7 @@ import re
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from easy_publish.catalog import BY_ID, PLATFORMS
+from easy_publish.catalog import BY_ID, PLATFORMS, bilibili_categories
 from easy_publish.content import ContentInput, image_sources, render_article
 from easy_publish.store import Store, dump, now, uid
 
@@ -114,7 +114,9 @@ class Service:
         if self.busy_account(identifier):
             raise Problem("账号仍有登录或发布任务，请等待完成或取消任务", "account_busy", 409)
         self.runtime.vault.delete(identifier)
-        self.store.execute("DELETE FROM accounts WHERE id=?", (identifier,))
+        with self.store.transaction() as db:
+            db.execute("DELETE FROM account_metadata WHERE account_id=?", (identifier,))
+            db.execute("DELETE FROM accounts WHERE id=?", (identifier,))
 
     async def connect_account(self, identifier, operation):
         account = self.account_row(identifier)
@@ -124,7 +126,9 @@ class Service:
             raise Problem(self.runtime.vault.message, "vault_unavailable", 503)
         if BY_ID[account["platform"]]["auth"] == "browser" and not self.runtime.state()["browserReady"]:
             raise Problem("请先在设置中安装发布浏览器", "browser_required")
-        self.store.execute("UPDATE accounts SET status='logging_in',message='正在连接账号',updated=? WHERE id=?", (now(), identifier))
+        with self.store.transaction() as db:
+            db.execute("DELETE FROM account_metadata WHERE account_id=?", (identifier,))
+            db.execute("UPDATE accounts SET status='logging_in',message='正在连接账号',updated=? WHERE id=?", (now(), identifier))
         self.jobs[identifier] = asyncio.create_task(self._connect(account, operation))
 
     async def _connect(self, account, operation):
@@ -136,7 +140,13 @@ class Service:
             result = await self.runtime.run(operation, {"platform_id": account["platform"], "account_id": identifier,
                                             "kind": BY_ID[account["platform"]]["kinds"][0], "mode": "draft", "title": ""}, event, "account-" + identifier)
             status = "ready" if result["status"] == "ready" else "expired" if operation == "check" else "login_required"
-            self.store.execute("UPDATE accounts SET status=?,message=?,updated=? WHERE id=?", (status, result["message"][:500], now(), identifier))
+            with self.store.transaction() as db:
+                db.execute("DELETE FROM account_metadata WHERE account_id=?", (identifier,))
+                if status == "ready" and account["platform"] == "bilibili":
+                    metadata = result.get("metadata")
+                    categories = metadata.get("bilibiliCategories") if isinstance(metadata, dict) else None
+                    db.execute("INSERT INTO account_metadata VALUES (?,?)", (identifier, dump(bilibili_categories(categories))))
+                db.execute("UPDATE accounts SET status=?,message=?,updated=? WHERE id=?", (status, result["message"][:500], now(), identifier))
         except asyncio.CancelledError:
             self.store.execute("UPDATE accounts SET status='login_required',message='登录已中断',updated=? WHERE id=?", (now(), identifier))
             raise
@@ -214,6 +224,36 @@ class Service:
                         errors.append(f"请填写{field['label']}")
                     elif value and field.get("choices") and value not in {c["value"] for c in field["choices"]}:
                         errors.append(f"{field['label']}的选项无效")
+                    elif value and field.get("dynamicChoices") == "bilibiliCategories" and value not in {c["value"] for c in self.store.account_categories(identifier)}:
+                        errors.append("视频分区不在此账号的可用分区中，请重新验证账号并选择分区")
+                if platform["id"] == "bilibili":
+                    if set(options) - {"copyright", "tid", "source"}:
+                        errors.append("哔哩哔哩平台选项无效")
+                    if len(content["description"]) > 2000:
+                        errors.append("哔哩哔哩简介最多 2000 字")
+                    tags = content["tags"]
+                    if not 1 <= len(tags) <= 12:
+                        errors.append("哔哩哔哩需要 1–12 个标签")
+                    if any(not tag.strip() or len(tag) > 20 or re.search(r"[,，\r\n]", tag) for tag in tags):
+                        errors.append("哔哩哔哩标签不能为空、超过 20 字或包含逗号及换行")
+                    if len({tag.strip() for tag in tags}) != len(tags):
+                        errors.append("哔哩哔哩标签不能重复")
+                    source = options.get("source", "")
+                    try:
+                        parsed = urlsplit(source)
+                        valid_source = (len(source) <= 200 and parsed.scheme in {"http", "https"} and bool(parsed.hostname)
+                                        and not parsed.username and not parsed.password and not re.search(r"\s", source))
+                    except ValueError:
+                        valid_source = False
+                    if options.get("copyright") == "2" and not valid_source:
+                        errors.append("转载视频需要填写有效的原始视频链接")
+                    elif options.get("copyright") == "1" and source:
+                        errors.append("原创视频请清空转载来源")
+                    if content["coverAssetId"]:
+                        cover = self.store.one("SELECT * FROM assets WHERE id=?", (content["coverAssetId"],))
+                        if cover and cover["size"] > 5 * 1024**2:
+                            errors.append("哔哩哔哩封面不能超过 5 MiB")
+                    warnings.append("哔哩哔哩投稿成功表示已提交审核，不代表已经公开发布")
                 if platform["id"] == "dayu":
                     url = options.get("source_url", "")
                     try:
@@ -304,7 +344,9 @@ class Service:
             return
         status = result.get("status", "failed")
         if status == "login_required":
-            self.store.execute("UPDATE accounts SET status='expired',message='登录已过期，请重新连接',updated=? WHERE id=?", (now(), task["account_id"]))
+            with self.store.transaction() as db:
+                db.execute("DELETE FROM account_metadata WHERE account_id=?", (task["account_id"],))
+                db.execute("UPDATE accounts SET status='expired',message='登录已过期，请重新连接',updated=? WHERE id=?", (now(), task["account_id"]))
             status = "failed"
         if status not in {"draft_created", "submitted", "published", "needs_attention", "failed", "cancelled", "unknown"}:
             status = "unknown" if current["fence"] else "failed"

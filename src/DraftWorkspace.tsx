@@ -3,10 +3,16 @@ import { ArrowRight, Check, CheckCheck, ChevronRight, FileText, Film, ImagePlus,
 import { bridge, errorMessage, request } from "./api";
 import MarkdownPreview, { AssetImage, useAssetMetadata } from "./MarkdownPreview";
 import { byteLabel, dateLabel, InlineError, Modal, PlatformMark, Spinner } from "./ui";
-import type { Account, Asset, Batch, Content, ContentInput, ContentKind, Platform, Preflight, PublishMode } from "./shared/types";
+import type { Account, Asset, Batch, Content, ContentInput, ContentKind, Platform, PlatformField, Preflight, PublishMode } from "./shared/types";
 
 const newContent = (kind: ContentKind): ContentInput => ({ kind, title: "", body: "", description: "", tags: [], author: "", videoAssetId: null, coverAssetId: null, imageAssetIds: [], platformOptions: {} });
 const asInput = (content: Content): ContentInput => ({ kind: content.kind, title: content.title, body: content.body, description: content.description, tags: content.tags, author: content.author, videoAssetId: content.videoAssetId, coverAssetId: content.coverAssetId, imageAssetIds: content.imageAssetIds, platformOptions: content.platformOptions || {} });
+
+function choicesFor(field: PlatformField, accounts: Account[]) {
+  if (field.dynamicChoices !== "bilibiliCategories") return field.choices || [];
+  const categories = accounts.map((account) => account.bilibiliCategories || []);
+  return (categories[0] || []).filter((choice) => categories.every((items) => items.some((item) => item.value === choice.value)));
+}
 
 interface Props {
   kind: ContentKind;
@@ -48,12 +54,13 @@ export default function DraftWorkspace({ kind, contents, platforms, accounts, on
   const relevantAccounts = accounts.filter((account) => kindPlatforms.some((platform) => platform.id === account.platformId));
   const readyAccounts = relevantAccounts.filter((account) => account.status === "ready" && platforms.find((platform) => platform.id === account.platformId)?.modes.includes(mode));
   const selectedPlatforms = kindPlatforms.filter((platform) => relevantAccounts.some((account) => selected.includes(account.id) && account.platformId === platform.id));
+  const categoryAvailability = JSON.stringify(relevantAccounts.filter((account) => selected.includes(account.id) && account.bilibiliCategories).map((account) => ({ id: account.id, categories: account.bilibiliCategories?.map((choice) => choice.value) })));
 
   useEffect(() => {
     setPreflight(null);
     setCheckedContent(null);
     enqueueId.current = null;
-  }, [form, selected, mode]);
+  }, [form, selected, mode, categoryAvailability]);
 
   // Accounts may expire while a draft is being edited. Keep the checked audience valid.
   const availability = readyAccounts.map((account) => account.id).sort().join(",");
@@ -225,7 +232,17 @@ export default function DraftWorkspace({ kind, contents, platforms, accounts, on
         {relevantAccounts.length > 0 && <button className="manage-accounts text-button" onClick={onAccounts}>管理发布账号<ArrowRight size={13} /></button>}
         {selectedPlatforms.map((platform) => {
           const fields = (platform.fields || []).filter((field) => field.kinds.includes(kind));
-          return fields.length > 0 && <div className="platform-options" key={platform.id}><h3>{platform.name}设置</h3>{fields.map((field) => <label className="field" key={field.key}><span>{field.label}{field.required && <b className="required-mark">*</b>}</span>{field.type === "select" ? <select disabled={!!busy} value={form.platformOptions[platform.id]?.[field.key] || ""} onChange={(event) => update("platformOptions", { ...form.platformOptions, [platform.id]: { ...form.platformOptions[platform.id], [field.key]: event.target.value } })}><option value="">请选择{field.label}</option>{field.choices?.map((choice) => <option key={choice.value} value={choice.value}>{choice.label}</option>)}</select> : <input disabled={!!busy} value={form.platformOptions[platform.id]?.[field.key] || ""} onChange={(event) => update("platformOptions", { ...form.platformOptions, [platform.id]: { ...form.platformOptions[platform.id], [field.key]: event.target.value } })} placeholder={field.hint || field.label} />}{field.hint && <small className="field-hint">{field.hint}</small>}</label>)}</div>;
+          const targetAccounts = relevantAccounts.filter((account) => selected.includes(account.id) && account.platformId === platform.id);
+          return fields.length > 0 && <div className="platform-options" key={platform.id}><h3>{platform.name}设置</h3>{fields.map((field) => {
+            const choices = choicesFor(field, targetAccounts);
+            const value = form.platformOptions[platform.id]?.[field.key] || "";
+            const missingChoices = field.dynamicChoices && !choices.length;
+            const invalidChoice = field.dynamicChoices && value && !choices.some((choice) => choice.value === value);
+            const choiceHint = missingChoices
+              ? targetAccounts.some((account) => !account.bilibiliCategories?.length) ? "连接或验证账号以获取分区。" : "所选账号没有共同可用的视频分区，请调整账号选择。"
+              : invalidChoice ? "原选分区不适用于当前账号，请重新选择。" : null;
+            return <label className="field" key={field.key}><span>{field.label}{field.required && <b className="required-mark">*</b>}</span>{field.type === "select" ? <select disabled={!!busy || !!missingChoices} value={invalidChoice ? "" : value} onChange={(event) => update("platformOptions", { ...form.platformOptions, [platform.id]: { ...form.platformOptions[platform.id], [field.key]: event.target.value } })}><option value="">请选择{field.label}</option>{choices.map((choice) => <option key={choice.value} value={choice.value}>{choice.label}</option>)}</select> : <input disabled={!!busy} value={value} onChange={(event) => update("platformOptions", { ...form.platformOptions, [platform.id]: { ...form.platformOptions[platform.id], [field.key]: event.target.value } })} placeholder={field.hint || field.label} />}{choiceHint && <small className="field-hint" role="status">{choiceHint}</small>}{field.hint && <small className="field-hint">{field.hint}</small>}</label>;
+          })}</div>;
         })}
         <div className="supported-platforms"><span>支持{article ? "文章" : "视频"}的平台</span><div>{kindPlatforms.map((platform) => <span key={platform.id} title={platform.description}><PlatformMark platform={platform} size="small" />{platform.name}</span>)}</div></div>
 

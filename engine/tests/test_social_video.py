@@ -51,13 +51,13 @@ class VideoAdapterTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("自定义封面", result.message)
         browser.assert_not_called()
 
-    async def test_bilibili_explicitly_unavailable_and_never_downloaded(self):
-        self.payload.platform_id = "bilibili"
+    async def test_unknown_platform_is_unavailable_without_opening_browser(self):
+        self.payload.platform_id = "unknown-platform"
         with patch.object(video, "_browser_page") as browser:
             for action in (video.login, video.check, video.publish):
                 result = await action(self.payload, self.ctx)
                 self.assertEqual(result.status, "needs_attention")
-                self.assertIn("尚未启用", result.message)
+                self.assertIn("未接入", result.message)
         browser.assert_not_called()
 
     async def test_timed_out_click_never_retries(self):

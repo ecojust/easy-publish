@@ -1,2 +1,2 @@
 """Easy Publish local publishing engine."""
-__version__ = "0.1.1"
+__version__ = "0.1.2"

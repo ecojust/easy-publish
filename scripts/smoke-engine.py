@@ -38,13 +38,14 @@ def request(port: int, path: str, token: str | None = None, method: str = "GET",
         return error.code, {}
 
 
-def check_worker(binary: Path, environment: dict[str, str], directory: Path) -> None:
-    workspace = directory / "work" / "job-offline-smoke"
+def check_worker(binary: Path, environment: dict[str, str], directory: Path,
+                 platform_id: str = "__packaging_unsupported__", expected_status: str = "needs_attention") -> None:
+    workspace = directory / "work" / f"job-offline-smoke-{platform_id}"
     workspace.mkdir(parents=True)
     payload = {
         "operation": "check", "parent_pid": os.getpid(), "workspace": str(workspace),
         "session_path": str(workspace / "session.json"), "browser_path": None,
-        "payload": {"platform_id": "__packaging_unsupported__", "account_id": "打包检查",
+        "payload": {"platform_id": platform_id, "account_id": "打包检查",
                     "kind": "video", "mode": "publish", "title": "离线工作进程检查"},
     }
     options = {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {"start_new_session": True}
@@ -59,7 +60,7 @@ def check_worker(binary: Path, environment: dict[str, str], directory: Path) -> 
             events = [json.loads(line) for line in output.decode("utf-8").splitlines() if line]
         except (ValueError, UnicodeError):
             raise RuntimeError("Frozen worker returned invalid UTF-8 protocol data") from None
-        if worker.returncode != 0 or not events or events[-1].get("event") != "result" or events[-1].get("status") != "needs_attention":
+        if worker.returncode != 0 or not events or events[-1].get("event") != "result" or events[-1].get("status") != expected_status:
             raise RuntimeError("Frozen offline worker failed its ownership/protocol check")
     finally:
         if worker.poll() is None:
@@ -121,6 +122,9 @@ def verify(binary: Path, timeout: int, expected_version: str, clean_environment:
                     raise RuntimeError(f"State is missing its {field} list")
             if not state["platforms"] or state.get("runtime", {}).get("version") != expected_version:
                 raise RuntimeError("Platform catalog or engine version did not match")
+            bilibili = next((item for item in state["platforms"] if item.get("id") == "bilibili"), {})
+            if bilibili.get("kinds") != ["video"] or bilibili.get("modes") != ["publish"]:
+                raise RuntimeError("Frozen engine is missing the Bilibili video capability")
             if token in json.dumps(state):
                 raise RuntimeError("Engine exposed its transport secret in public state")
             content = {
@@ -144,6 +148,9 @@ def verify(binary: Path, timeout: int, expected_version: str, clean_environment:
             if status != 200 or any(item.get("id") == content_id for item in state.get("contents", [])):
                 raise RuntimeError("Deleted smoke article remained in state")
             check_worker(binary, environment, Path(directory))
+            # No session means no network request. This exercises the bundled
+            # Bilibili adapter and its dependencies through the real worker.
+            check_worker(binary, environment, Path(directory), "bilibili", "login_required")
             status, _ = request(port, "/api/shutdown", token, "POST")
             if status != 200:
                 raise RuntimeError("Engine rejected graceful shutdown")
@@ -166,14 +173,14 @@ def verify(binary: Path, timeout: int, expected_version: str, clean_environment:
                     child.kill()
                     child.wait(timeout=5)
             child.stdout.close()
-    print("Embedded engine smoke passed: startup, authentication, UTF-8 article save/delete, offline worker, graceful shutdown.")
+    print("Embedded engine smoke passed: startup, authentication, UTF-8 article save/delete, offline workers including Bilibili, graceful shutdown.")
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("binary", type=Path)
     parser.add_argument("--timeout", type=int, default=120)
-    parser.add_argument("--expected-version", default="0.1.1")
+    parser.add_argument("--expected-version", default="0.1.2")
     parser.add_argument("--clean-environment", action="store_true", help="Use a minimal macOS application environment without developer runtime paths")
     args = parser.parse_args()
     try:

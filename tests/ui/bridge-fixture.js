@@ -6,21 +6,27 @@
   const platform = (id, name, color, kinds, modes, extra = {}) => ({ id, name, color, kinds, modes, auth: "browser", titleLimit: 100, description: `${name}浏览器发布连接（测试替身）`, homeUrl: `https://${id}.example.test/creator`, fields: [], ...extra });
   const platforms = [
     platform("wechat", "微信公众号", "#21b36b", ["article"], ["publish", "draft"], { auth: "wechat_api", description: "通过官方 API 创建文章草稿或提交发布（测试替身）" }),
-    platform("zhihu", "知乎", "#2680e9", ["article", "video"], ["publish"]),
-    platform("dayu", "大鱼号", "#ed8b3c", ["article", "video"], ["publish"], { fields: [{ key: "source", label: "创作来源", type: "select", required: true, kinds: ["article", "video"], choices: [{ value: "无需标注", label: "无需标注" }, { value: "AI生成", label: "AI生成" }] }] }),
+    platform("zhihu", "知乎", "#2680e9", ["article"], ["publish"]),
+    platform("dayu", "大鱼号", "#ed8b3c", ["article"], ["publish"], { fields: [{ key: "source", label: "信息来源", type: "select", required: true, kinds: ["article"], choices: [{ value: "无需标注", label: "无需标注" }, { value: "AI生成", label: "AI生成" }] }] }),
     platform("xueqiu", "雪球", "#488ecb", ["article"], ["publish"]),
     platform("douyin", "抖音", "#32374c", ["video"], ["publish"]),
-    platform("xhs", "小红书", "#e8576f", ["video"], ["publish"]),
+    platform("xiaohongshu", "小红书", "#e8576f", ["video"], ["publish"]),
     platform("channels", "视频号", "#de9e4d", ["video"], ["publish", "draft"]),
+    platform("bilibili", "哔哩哔哩", "#00a1d6", ["video"], ["publish"], { titleLimit: 80, fields: [
+      { key: "copyright", label: "创作类型", type: "select", required: true, kinds: ["video"], choices: [{ value: "1", label: "原创" }, { value: "2", label: "转载" }] },
+      { key: "tid", label: "视频分区", type: "select", required: true, kinds: ["video"], dynamicChoices: "bilibiliCategories" },
+      { key: "source", label: "转载来源", type: "text", required: false, kinds: ["video"], hint: "转载必填，填写原始视频链接；原创请留空" },
+    ] }),
   ];
-  const account = (id, platformId, label, status = "ready") => ({ id, platformId, label, status, message: status === "ready" ? "已连接（浏览器测试替身）" : "请连接测试账号", updatedAt: date, credentialConfigured: platformId === "wechat" });
+  const bilibiliCategories = [{ value: "101", label: "测试分区 / 科普" }, { value: "102", label: "测试分区 / 创作" }];
+  const account = (id, platformId, label, status = "ready") => ({ id, platformId, label, status, message: status === "ready" ? "已连接（浏览器测试替身）" : "请连接测试账号", updatedAt: date, credentialConfigured: platformId === "wechat", ...(platformId === "bilibili" ? { bilibiliCategories: status === "ready" ? clone(bilibiliCategories) : [] } : {}) });
   const draft = (id, kind, title, body) => ({ id, kind, title, body, description: "", tags: [], author: "", videoAssetId: null, coverAssetId: null, imageAssetIds: [], platformOptions: {}, createdAt: date, updatedAt: date, revision: 1 });
   const state = {
     platforms,
-    accounts: [account("a-wechat", "wechat", "品牌公众号"), account("a-zhihu", "zhihu", "创作笔记"), account("a-dayu", "dayu", "创作工作室"), account("a-douyin", "douyin", "品牌抖音"), account("a-xhs", "xhs", "品牌小红书"), account("a-channels", "channels", "品牌视频号", "login_required")],
+    accounts: [account("a-wechat", "wechat", "品牌公众号"), account("a-zhihu", "zhihu", "创作笔记"), account("a-dayu", "dayu", "创作工作室"), account("a-douyin", "douyin", "品牌抖音"), account("a-xhs", "xiaohongshu", "品牌小红书"), account("a-channels", "channels", "品牌视频号", "login_required"), account("a-bilibili", "bilibili", "品牌哔哩哔哩")],
     contents: [draft("c-article", "article", "把创作的时间，还给创作", "## 少一点重复，多一点表达\n\n每一篇好内容，都值得被更多人看见。\n\n当文章写完、视频剪好，接下来的分享应该简单一些。\n\n### 这一次，专注内容本身\n\n- 在一个工作空间整理素材\n- 为不同平台选择合适的账号\n- 清楚了解每个目标的发布进度\n\n**一份创作，更多可能。**"), draft("c-article-2", "article", "从灵感到第一篇文章", "写下你的第一个想法。")],
     batches: [],
-    runtime: { browserReady: true, browserInstalling: false, browserMessage: "测试浏览器已就绪", vaultReady: true, vaultMessage: "测试凭据库已就绪", version: "0.1.1" },
+    runtime: { browserReady: true, browserInstalling: false, browserMessage: "测试浏览器已就绪", vaultReady: true, vaultMessage: "测试凭据库已就绪", version: "0.1.2" },
   };
   const assets = {};
   const calls = [];
@@ -92,6 +98,7 @@
       if (method === "POST" && (path.endsWith("/login") || path.endsWith("/check"))) {
         const account = state.accounts.find((entry) => entry.id === path.split("/")[3]);
         account.status = "ready"; account.message = "测试会话已连接";
+        if (account.platformId === "bilibili") account.bilibiliCategories = clone(bilibiliCategories);
         return { ok: true };
       }
       if (method === "DELETE" && path.startsWith("/api/accounts/")) { state.accounts = state.accounts.filter((item) => item.id !== path.split("/").pop()); return { ok: true }; }

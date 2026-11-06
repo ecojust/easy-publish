@@ -42,7 +42,7 @@ def _platform(payload: PublishPayload) -> str:
 
 
 def _unavailable() -> ProviderResult:
-    return ProviderResult("needs_attention", "Bilibili 发布驱动尚未启用；请使用 B 站创作中心发布。本版本不会自动下载或执行 biliup。", url="https://member.bilibili.com/")
+    return ProviderResult("needs_attention", "此平台未接入浏览器视频发布驱动，请选择受支持的平台")
 
 
 @asynccontextmanager

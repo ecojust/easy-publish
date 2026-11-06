@@ -160,6 +160,8 @@ def worker_main() -> int:
         context = ProviderContext(session, workspace, request.get("browser_path"), emit)
         if payload.platform_id in {"wechat", "wechat_official", "wechat_official_account"}:
             from .providers import wechat as provider
+        elif payload.platform_id == "bilibili":
+            from .providers import bilibili as provider
         else:
             from .providers import social as provider
         result = asyncio.run(getattr(provider, operation)(payload, context))

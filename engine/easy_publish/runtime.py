@@ -14,6 +14,7 @@ import sys
 import tempfile
 
 from .vault import Vault
+from .catalog import bilibili_categories
 from . import __version__
 
 
@@ -223,7 +224,7 @@ class Runtime:
             # workspace so cancellation and crash recovery remove them too.
             for variable in ("TMPDIR", "TEMP", "TMP"):
                 environment[variable] = str(workspace)
-            process = await asyncio.create_subprocess_exec(*self._worker_command(), stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL, env=environment, **_process_options())
+            process = await asyncio.create_subprocess_exec(*self._worker_command(), stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL, limit=1024 * 1024, env=environment, **_process_options())
             self._jobs[job_id] = process
             request = {"operation": operation, "payload": request_payload, "workspace": str(workspace), "session_path": str(session), "browser_path": self.browser_path, "parent_pid": os.getpid(), "worker_group_id": process.pid if os.name != "nt" else None}
             process.stdin.write((json.dumps(request, ensure_ascii=False) + "\n").encode("utf-8"))
@@ -246,6 +247,10 @@ class Runtime:
                             raise ValueError("Invalid worker result")
                         result = {key: event.get(key) for key in ("status", "message", "remote_id", "url")}
                         result["message"] = str(result.get("message", ""))[:4000]
+                        if payload.get("platform_id") == "bilibili" and operation in {"login", "check"} and result["status"] == "ready":
+                            metadata = event.get("metadata")
+                            categories = metadata.get("bilibiliCategories") if isinstance(metadata, dict) else None
+                            result["metadata"] = {"bilibiliCategories": bilibili_categories(categories)}
                     else:
                         raise ValueError("Unexpected worker event")
                 await process.wait()

@@ -12,6 +12,8 @@ class ProviderResult:
     message: str
     remote_id: str | None = None
     url: str | None = None
+    # Public capability data only; credentials remain in the encrypted session.
+    metadata: dict = field(default_factory=dict)
 
 @dataclass
 class PublishPayload:

@@ -1,6 +1,6 @@
 # 第三方来源与许可
 
-Easy Publish 使用 [MIT 许可证](LICENSE)。本文件记录直接参考或包含源码的两个项目；第三方软件仍适用各自的原始许可证。
+Easy Publish 使用 [MIT 许可证](LICENSE)。本文件记录直接参考或包含源码的项目；第三方软件仍适用各自的原始许可证。
 
 ## social-auto-upload
 
@@ -26,6 +26,15 @@ Easy Publish 使用 [MIT 许可证](LICENSE)。本文件记录直接参考或包
 
 Easy Publish 的 [微信公众号适配器](engine/easy_publish/providers/wechat.py) 是独立编写的确定性官方 API 实现。它使用 AppID / AppSecret、内存访问令牌、图片上传、草稿与 `freepublish` 发布查询，分别记录草稿、受理和最终结果。未复制 oDesk 的 AI / OpenCode 调度、技能包、脚本、配置或任何 token 缓存文件。
 
+## biliup
+
+- 项目：[biliup/biliup](https://github.com/biliup/biliup)
+- 固定提交：[`f23b7614b250caacba8a1475412515264dc30558`](https://github.com/biliup/biliup/tree/f23b7614b250caacba8a1475412515264dc30558)
+- 许可证：MIT
+- 版权：Copyright (c) 2019 ForgQi
+
+参考该提交中的账号验证、创作中心分类、UPOS 上传和 Web 投稿协议。Easy Publish 独立实现浏览器登录、加密会话绑定、动态分区、持久提交边界和回执处理；不下载或执行 biliup 二进制，不复制账号或配置。具体路径与验证范围见 [BILIBILI_SOURCES.md](engine/easy_publish/providers/BILIBILI_SOURCES.md)。
+
 ## MIT 许可文本
 
 以下文本保留上述来源的许可条件；各源码目录中已有的版权与许可声明继续保留。
@@ -35,6 +44,7 @@ MIT License
 
 Copyright (c) 2023 dreammis
 Copyright (c) 2025 桔子桑
+Copyright (c) 2019 ForgQi
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
