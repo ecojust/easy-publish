@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ArrowRight, CheckCheck, FileText, ImagePlus, Plus, Save, Send, ShieldCheck, Sparkles, Trash2, Upload, X } from "lucide-react";
+import { ArrowRight, CheckCheck, Eye, FileText, ImagePlus, Plus, Save, Send, ShieldCheck, Sparkles, Trash2, Upload, X } from "lucide-react";
 import { bridge, errorMessage, request } from "./api";
 import MarkdownPreview, { AssetImage } from "./MarkdownPreview";
 import { dateLabel, InlineError, Modal, PlatformMark, Spinner } from "./ui";
@@ -28,6 +28,8 @@ export default function ArticleWorkspace({ contents, platforms, accounts, articl
   const [mode, setMode] = useState<PublishMode>("publish");
   const [repeatIds, setRepeatIds] = useState<string[]>([]);
   const [previewId, setPreviewId] = useState("");
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [previewError, setPreviewError] = useState<string | null>(null);
   const [preflight, setPreflight] = useState<Preflight | null>(null);
   const [pendingSelection, setPendingSelection] = useState<Content | "new" | null>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -56,6 +58,8 @@ export default function ArticleWorkspace({ contents, platforms, accounts, articl
   const activeTemplate = activeAccount?.platformId === "wechat" ? activeAccount.wechatTemplateId || "clean" : form.articleTemplateId;
   const selectedPlatforms = articlePlatforms.filter((platform) => targets.some((account) => account.platformId === platform.id));
 
+  useEffect(() => { setPreviewError(null); }, [previewOpen, activeAccount?.id, activeTemplate, form.body]);
+
   const signature = JSON.stringify({ contentId, form, targetKey, mode });
   const signatureRef = useRef(signature); signatureRef.current = signature;
   useEffect(() => { setPreflight(null); checkedId.current = null; checkedSignature.current = null; enqueueId.current = null; }, [signature]);
@@ -83,7 +87,7 @@ export default function ArticleWorkspace({ contents, platforms, accounts, articl
     setPreflight(null); checkedId.current = null; checkedSignature.current = null; enqueueId.current = null;
     const next = entry === "new" ? emptyArticle() : asInput(entry);
     setContentId(entry === "new" ? null : entry.id); setForm(next); setStored(entry === "new" ? undefined : entry);
-    setSavedSnapshot(JSON.stringify(next)); setPendingSelection(null); setRepeatIds([]); setTagInput(""); setError(null); setJob(null);
+    setSavedSnapshot(JSON.stringify(next)); setPendingSelection(null); setRepeatIds([]); setTagInput(""); setError(null); setJob(null); setPreviewOpen(false);
   }
   function choose(entry: Content | "new") {
     if (entry !== "new" && entry.id === contentId) return;
@@ -96,8 +100,8 @@ export default function ArticleWorkspace({ contents, platforms, accounts, articl
       const result = value.content;
       if (contentRef.current === result.id && sourceKey(formRef.current) === sourceKey(asInput(result))) {
         setStored(result); setForm((latest) => ({ ...latest, body: result.body })); setSavedSnapshot(JSON.stringify(asInput(result)));
-        onNotice("文章已整理，请查看下方各平台的最终预览。");
-      } else onNotice("整理已完成，原文有新的修改，请重新整理后预览。");
+        onNotice("Markdown 已生成，点击右上角“预览”查看各平台的模板效果。");
+      } else onNotice("生成已完成，原文有新的修改，请重新生成后预览。");
       await onRefresh();
     } else if (value.status === "failed") setError(value.message || "整理未完成，原文已保留，请稍后重试。");
   }
@@ -167,7 +171,7 @@ export default function ArticleWorkspace({ contents, platforms, accounts, articl
   async function check() {
     await perform("preflight", async () => {
       if (!targets.length) throw new Error("请在账号管理开启需要发布的文章账号。");
-      if (!ready) throw new Error("请先整理当前原文并检查预览。");
+      if (!ready) throw new Error("请先生成当前原文的 Markdown 并检查预览。");
       const accountIds = targets.map((account) => account.id);
       const saved = await persist();
       const expected = JSON.stringify({ contentId: saved.id, form: asInput(saved), targetKey, mode });
@@ -185,7 +189,7 @@ export default function ArticleWorkspace({ contents, platforms, accounts, articl
   }
 
   return <div className="workspace-page article-workspace">
-    <div className="page-heading"><div><div className="eyebrow">CONTENT WORKSPACE</div><h1>文章<span className="heading-count">{entries.length}</span></h1><p>写好原文，预览每个平台的最终效果。</p></div><button className="button primary" disabled={!!busy || running} onClick={() => choose("new")}><Plus size={17} />新建文章</button></div>
+    <div className="page-heading"><div><div className="eyebrow">CONTENT WORKSPACE</div><h1>文章<span className="heading-count">{entries.length}</span></h1><p>输入纯文本，生成 Markdown，再预览各平台的模板效果。</p></div><div className="page-heading-actions"><button className="button" onClick={() => setPreviewOpen(true)}><Eye size={17} />预览</button><button className="button primary" disabled={!!busy || running} onClick={() => choose("new")}><Plus size={17} />新建文章</button></div></div>
     <div className="article-library" aria-label="本地文章">{!contentId && <button className="draft-item selected"><FileText size={16} /><span><strong>{form.title || "未命名文章"}</strong><small>尚未保存</small></span></button>}{entries.map((entry) => <button key={entry.id} className={`draft-item ${entry.id === contentId ? "selected" : ""}`} disabled={!!busy || running} onClick={() => choose(entry)}><FileText size={16} /><span><strong>{entry.id === contentId ? form.title || entry.title : entry.title}</strong><small>{dateLabel(entry.updatedAt)}</small></span>{entry.id === contentId && dirty && <span className="unsaved-dot" />}</button>)}</div>
     <section className="editor-panel panel" aria-label="文章编辑器">
       <div className="editor-toolbar"><div className="editor-breadcrumb"><FileText size={16} /><span>{plain ? "原文编辑" : "Markdown 稿件"}</span></div><div className="toolbar-actions"><span className={`save-state ${dirty ? "dirty" : ""}`}>{dirty ? "有未保存修改" : "已保存到本地"}</span>{contentId && <button className="icon-button danger-hover" aria-label="删除本地稿件" disabled={!!busy || running} onClick={() => setDeleteOpen(true)}><Trash2 size={15} /></button>}<button className="button small" disabled={!!busy || running} onClick={() => perform("save", async () => { await persist(); onNotice("稿件已保存到本地。"); })}>{busy === "save" ? <Spinner size={14} /> : <Save size={14} />}保存</button></div></div>
@@ -196,22 +200,29 @@ export default function ArticleWorkspace({ contents, platforms, accounts, articl
           <div className="article-metadata-row"><label className="field"><span>作者 <small>可选</small></span><input placeholder="作者名称" value={form.author} onChange={(event) => update("author", event.target.value)} maxLength={100} /></label><label className="field"><span>摘要 <small>可选</small></span><input placeholder="用几句话概括文章内容" value={form.description} onChange={(event) => update("description", event.target.value)} maxLength={5000} /></label></div>
           <div className="field"><label htmlFor="article-tags">话题标签 <small>回车添加</small></label><div className="tag-input">{form.tags.map((tag) => <span className="tag" key={tag}>{tag}<button aria-label={`移除标签 ${tag}`} onClick={() => update("tags", form.tags.filter((value) => value !== tag))}><X size={11} /></button></span>)}<input id="article-tags" value={tagInput} placeholder="添加话题标签…" onChange={(event) => setTagInput(event.target.value)} onBlur={addTags} onKeyDown={(event) => { if (["Enter", ",", "，"].includes(event.key)) { event.preventDefault(); addTags(); } }} /></div></div>
         </div></div>
-        <div className="article-body"><div className="body-toolbar"><span className="field-label">{plain ? "文章原文" : "Markdown 正文"}</span><div className="toolbar-actions"><button className="icon-button" aria-label="导入文章文件" disabled={running} onClick={() => importFile("article")}><Upload size={16} /></button><button className="icon-button" aria-label="插入正文图片" disabled={running} onClick={() => importFile("image")}><ImagePlus size={16} /></button></div></div><textarea ref={editor} className="markdown-editor" aria-label="文章正文" placeholder={plain ? "粘贴或写下文章原文，点击下方“整理并预览”生成排版。" : "编辑 Markdown 正文…"} value={plain ? form.sourceText : form.body} onChange={(event) => update(plain ? "sourceText" : "body", event.target.value)} spellCheck={false} /><div className="editor-footer"><span>{(plain ? form.sourceText : form.body).length.toLocaleString()} 字符</span><span>{plain ? "原文会单独保留" : "Markdown 稿件直接预览"}</span></div></div>
+        <div className="article-body"><div className="body-toolbar"><span className="field-label">{plain ? "文章原文 · 纯文本" : "Markdown 正文"}</span><div className="toolbar-actions"><button className="icon-button" aria-label="导入文章文件" disabled={running} onClick={() => importFile("article")}><Upload size={16} /></button><button className="icon-button" aria-label="插入正文图片" disabled={running} onClick={() => importFile("image")}><ImagePlus size={16} /></button></div></div><textarea ref={editor} className="markdown-editor" aria-label="文章正文" placeholder={plain ? "粘贴或写下纯文本原文，点击“生成”转换为 Markdown，再点击右上角“预览”查看模板效果。" : "编辑 Markdown 正文…"} value={plain ? form.sourceText : form.body} onChange={(event) => update(plain ? "sourceText" : "body", event.target.value)} spellCheck={false} /><div className="editor-footer"><span>{(plain ? form.sourceText : form.body).length.toLocaleString()} 字符</span><span>{plain ? "原文会单独保留" : "Markdown 稿件直接预览"}</span></div></div>
       </fieldset>
-      {plain && <div className="article-format-actions"><div><button className="button primary" disabled={!!busy || running || !form.sourceText.trim()} onClick={formatArticle}>{busy === "format" || running ? <Spinner size={16} /> : <Sparkles size={16} />}{running ? "正在整理" : "整理并预览"}</button>{running && <button className="button" disabled={!!busy} onClick={() => perform("cancel-format", async () => { if (job) await acceptJob(await request<FormatJob>("POST", `/api/format-jobs/${job.id}/cancel`)); })}>取消整理</button>}<button className="text-button" onClick={onSettings}>{formatting?.modelName || "检查免费整理服务"}<ArrowRight size={13} /></button></div><p>点击整理会将原文发送至所选的免费模型服务，整理后先预览。</p>{job && <p role="status">{job.message}</p>}</div>}
+      {plain && <div className="article-format-actions"><div><button className="button primary" disabled={!!busy || running || !form.sourceText.trim()} onClick={formatArticle}>{busy === "format" || running ? <Spinner size={16} /> : <Sparkles size={16} />}{busy === "format" || running ? "正在生成" : "生成"}</button>{running && <button className="button" disabled={!!busy} onClick={() => perform("cancel-format", async () => { if (job) await acceptJob(await request<FormatJob>("POST", `/api/format-jobs/${job.id}/cancel`)); })}>取消生成</button>}<button className="text-button" onClick={onSettings}>{formatting?.modelName || "检查免费整理服务"}<ArrowRight size={13} /></button></div><p>点击“生成”后，OpenCode 会通过免费模型将原文转换为 Markdown。完成后点击右上角“预览”，按各账号模板渲染。</p>{job && <p role="status">{job.message}</p>}</div>}
     </section>
 
-    <section className="article-publishing panel" aria-label="文章最终预览与发布">
-      <div className="article-preview-heading"><div><h2>各平台最终预览</h2><p>使用账号管理中已开启的文章账号，共 {targets.length} 个发布目标。</p></div><button className="button small" onClick={onAccounts}>管理发布账号<ArrowRight size={14} /></button></div>
+    <section className="article-publishing panel" aria-label="文章发布设置">
+      <div className="article-preview-heading"><div><h2>发布文章</h2><p>使用账号管理中已开启的文章账号，共 {targets.length} 个发布目标。</p></div><button className="button small" onClick={onAccounts}>管理发布账号<ArrowRight size={14} /></button></div>
       <div className="article-publish-mode"><div className="segmented-control"><button className={mode === "publish" ? "active" : ""} disabled={!!busy} onClick={() => setMode("publish")}>发布内容</button><button className={mode === "draft" ? "active" : ""} disabled={!!busy} onClick={() => setMode("draft")}>平台草稿</button></div></div>
       {previous.length > 0 && <div className="article-history">{previous.map((account) => <div key={account.id}><span>{account.label} · {historyLabels[history[account.platformId]]}</span><button className="text-button" disabled={!!busy} onClick={() => setRepeatIds((ids) => [...ids, account.id])}>加入本次再次发布</button></div>)}</div>}
-      {targets.length > 0 ? <><div className="article-preview-tabs" role="tablist" aria-label="文章发布账号预览">{targets.map((account) => <button key={account.id} role="tab" aria-selected={account.id === activeAccount?.id} onClick={() => setPreviewId(account.id)}><PlatformMark platform={platforms.find((platform) => platform.id === account.platformId)} size="small" /><span><strong>{account.label}</strong><small>{account.platformId === "wechat" ? articleTemplates.find((template) => template.id === (account.wechatTemplateId || "clean"))?.name : platforms.find((platform) => platform.id === account.platformId)?.name}{repeatIds.includes(account.id) ? " · 再次发布" : ""}</small></span></button>)}</div>
+      {targets.length > 0 ? <><div className="article-target-summary" aria-label="本次文章发布账号">{targets.map((account) => <span className="article-target-chip" key={account.id}><PlatformMark platform={platforms.find((platform) => platform.id === account.platformId)} size="small" /><span><strong>{account.label}</strong><small>{platforms.find((platform) => platform.id === account.platformId)?.name}{repeatIds.includes(account.id) ? " · 再次发布" : ""}</small></span></span>)}</div>
         {selectedPlatforms.some((platform) => platform.fields.some((field) => field.kinds.includes("article"))) && <div className="article-platform-fields">{selectedPlatforms.map((platform) => platform.fields.filter((field) => field.kinds.includes("article")).map((field) => <label className="field" key={`${platform.id}:${field.key}`}><span>{platform.name} · {field.label}{field.required && <b className="required-mark">*</b>}</span>{field.type === "select" ? <select disabled={!!busy} value={form.platformOptions[platform.id]?.[field.key] || ""} onChange={(event) => update("platformOptions", { ...form.platformOptions, [platform.id]: { ...form.platformOptions[platform.id], [field.key]: event.target.value } })}><option value="">请选择{field.label}</option>{field.choices?.map((choice) => <option key={choice.value} value={choice.value}>{choice.label}</option>)}</select> : <input disabled={!!busy} value={form.platformOptions[platform.id]?.[field.key] || ""} onChange={(event) => update("platformOptions", { ...form.platformOptions, [platform.id]: { ...form.platformOptions[platform.id], [field.key]: event.target.value } })} placeholder={field.hint || field.label} />}</label>))}</div>}
-        <div className="article-final-preview" role="tabpanel" aria-label={`${activeAccount?.label || "文章"} 最终预览`}>{ready ? <><div className="article-preview-meta"><h3>{form.title || "文章标题"}</h3>{form.author && <span>{form.author}</span>}{form.coverAssetId && <AssetImage id={form.coverAssetId} alt="文章封面" />}</div><MarkdownPreview source={form.body} assetIds={form.imageAssetIds} templateId={activeTemplate} platformId={activePlatform?.id} accountId={activeAccount?.platformId === "wechat" ? activeAccount.id : undefined} onError={setError} /></> : <div className="article-preview-empty"><FileText size={28} /><strong>{running ? "正在整理文章" : plain ? "整理原文后，预览会显示在这里" : "写下正文，查看最终预览"}</strong><p>{running ? "原文已保留，整理完成后会自动更新预览。" : plain && form.body ? "原文已修改，请重新整理当前内容。" : "预览完成后，检查内容并发布到已开启的账号。"}</p></div>}</div>
       </> : <div className="article-preview-empty"><Send size={28} /><strong>暂无本次发布账号</strong><p>在账号管理开启支持{mode === "draft" ? "平台草稿" : "文章发布"}的已连接账号。</p><button className="button small" onClick={onAccounts}>前往账号管理</button></div>}
       {preflight && <div className={`preflight-result ${preflight.ok ? "passed" : "blocked"}`} role="status"><strong><ShieldCheck size={15} />{preflight.ok ? "发布前检查通过" : "需要完善以下内容"}</strong>{preflight.targets.map((target) => <div key={target.accountId}>{[...target.errors, ...target.warnings].map((message, index) => <p key={index}><b>{accounts.find((account) => account.id === target.accountId)?.label}：</b>{message}</p>)}</div>)}</div>}
       <div className="article-publication-actions"><span>本次发布到 <strong>{targets.length}</strong> 个账号</span><button className="button check-button" disabled={!!busy || running || !targets.length || !ready} onClick={check}>{busy === "preflight" ? <Spinner size={16} /> : <CheckCheck size={16} />}检查{mode === "draft" ? "草稿" : "发布"}内容</button><button className="button primary" disabled={!!busy || running || !preflight?.ok} onClick={publish}>{busy === "publish" ? <Spinner size={16} /> : mode === "draft" ? <Save size={16} /> : <Send size={16} />}{mode === "draft" ? "保存平台草稿" : "发布到已开启账号"}</button></div>
     </section>
+    {previewOpen && <Modal title="文章最终预览" className="article-preview-modal" onClose={() => setPreviewOpen(false)}>
+      <p className="modal-description">按本次发布账号的模板显示最终效果，模板可在账号管理中设置。</p>
+      <InlineError message={previewError || (job?.status === "failed" ? job.message || error : null)} />
+      {targets.length > 0 ? <>
+        <div className="article-preview-tabs" role="tablist" aria-label="文章发布账号预览">{targets.map((account) => <button key={account.id} role="tab" aria-selected={account.id === activeAccount?.id} onClick={() => setPreviewId(account.id)}><PlatformMark platform={platforms.find((platform) => platform.id === account.platformId)} size="small" /><span><strong>{account.label}</strong><small>{account.platformId === "wechat" ? articleTemplates.find((template) => template.id === (account.wechatTemplateId || "clean"))?.name : platforms.find((platform) => platform.id === account.platformId)?.name}{repeatIds.includes(account.id) ? " · 再次发布" : ""}</small></span></button>)}</div>
+        <div className="article-final-preview" role="tabpanel" aria-label={`${activeAccount?.label || "文章"} 最终预览`}>{ready ? <><div className="article-preview-meta"><h3>{form.title || "文章标题"}</h3>{form.author && <span>{form.author}</span>}{form.coverAssetId && <AssetImage id={form.coverAssetId} alt="文章封面" />}</div><MarkdownPreview source={form.body} assetIds={form.imageAssetIds} templateId={activeTemplate} platformId={activePlatform?.id} accountId={activeAccount?.platformId === "wechat" ? activeAccount.id : undefined} onError={setPreviewError} /></> : <div className="article-preview-empty"><FileText size={28} /><strong>{running ? "正在生成 Markdown" : plain ? "请先生成 Markdown，再查看模板预览" : "写下正文，查看最终预览"}</strong><p>{running ? "原文已保留，生成完成后会显示模板预览。" : plain && form.body ? "原文已修改，请返回编辑器重新生成当前内容。" : plain ? "关闭预览，在编辑器输入纯文本并点击“生成”。" : "预览完成后，检查内容并发布到已开启的账号。"}</p></div>}</div>
+      </> : <div className="article-preview-empty"><Send size={28} /><strong>暂无本次发布账号</strong><p>在账号管理开启支持{mode === "draft" ? "平台草稿" : "文章发布"}的已连接账号。</p><button className="button small" onClick={() => { setPreviewOpen(false); onAccounts(); }}>前往账号管理</button></div>}
+    </Modal>}
     {pendingSelection && <Modal title="保留当前修改？" onClose={() => setPendingSelection(null)}><p className="modal-description">当前稿件还有未保存的修改。继续切换会放弃这些修改。</p><div className="modal-actions"><button className="button" onClick={() => setPendingSelection(null)}>继续编辑</button><button className="button danger" onClick={() => load(pendingSelection)}>放弃修改并切换</button></div></Modal>}
     {deleteOpen && <Modal title="删除本地稿件" onClose={() => setDeleteOpen(false)} busy={!!busy}><p className="modal-description">删除“{form.title}”的本地稿件？平台内容和已有发布任务不会受到影响。</p><InlineError message={error} /><div className="modal-actions"><button className="button" disabled={!!busy} onClick={() => setDeleteOpen(false)}>取消</button><button className="button danger" disabled={!!busy} onClick={() => perform("delete", async () => { await request("DELETE", `/api/contents/${contentId}`); await onRefresh(); setDeleteOpen(false); load("new"); onNotice("本地稿件已删除。"); })}>删除稿件</button></div></Modal>}
   </div>;

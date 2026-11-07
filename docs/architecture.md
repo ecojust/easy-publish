@@ -57,11 +57,11 @@ API 成功直接返回 JSON，失败为 `{"error":"公开且已脱敏的错误",
 
 SQLite 保存稿件、账号公开元数据、批次及各目标状态。`Content.platformPublicationStates` 从全部任务读取每个平台最新的 submitted／published／unknown 回执，不受界面最近 200 批限制；草稿和失败不覆盖历史成功。已发布稿件可以使用新的 requestId 再次投稿，同一 requestId 仍返回原批次。批次捕获不可变稿件快照、账号 ID／名称和目标，逐个目标执行，分别给出结果。已有待执行任务的账号不能被删除或重新登录。明确失败的目标可重试；成功目标不重复，结果未知的目标须先在平台核对。关闭应用后不自动重新提交未确认结果。
 
-`Account.defaultSelected` 保存在独立的 `account_preferences` 表，旧账号缺少记录时返回 true；SQLite schema 版本 4 在原表增加 `wechat_template_id`，保留旧偏好；公众号默认 clean。删除账号同步清理偏好，重新连接不覆盖偏好。文章页按偏好、连接状态、类型／操作能力和既有投稿历史自动筛选，不另设账号勾选区；视频保留手动选择。账号开关不会创建任务，常规轮询不覆盖未保存稿件。
+`Account.defaultSelected` 保存在独立的 `account_preferences` 表，旧账号缺少记录时返回 true；SQLite schema 版本 4 在原表增加 `wechat_template_id`，保留旧偏好；公众号默认 clean。删除账号同步清理偏好，重新连接不覆盖偏好。文章和视频页均按偏好、连接状态、类型／操作能力和既有投稿历史自动筛选，不另设账号勾选区；已有投稿记录可显式加入本次再次发布。发布前检查绑定稿件、目标和模式，任意变化使旧检查失效，过期响应不能重新启用发布。账号开关不会创建任务，常规轮询不覆盖未保存稿件。
 
 `ContentInput.articleTemplateId` 为 clean／editorial／journal／tech／forest／artdeco，旧稿件默认为 clean，保留非公众号和旧批次兼容。新公众号任务以账号的wechatTemplateId为准，创建批次时在accountTemplateIds映射中冻结；之后修改账号模板不会改变队列内任务。Markdown 保持原稿，在生成每个目标的 payload 时按模板及平台转换 HTML；模板缩略图、预览与实际提交使用同一服务端渲染器；API 与 MCP 复用引擎的 ArticleTemplateId 类型。六套排版来源、图注和平台兼容说明见 [文章模板](article-templates.md)。
 
-新稿件的inputFormat为plain，sourceText保存原文、body保存整理后的Markdown；旧API缺省markdown，不强迫其他agent已写好的Markdown再次调用模型。原文和图片顺序的指纹由引擎计算，客户端不能提交；formatReady为派生公开状态。整理任务有revision及requestId校验，结果写入前再次核对版本，取消／失败／过期结果不覆盖原文。保存、预览、切换账号或模板均不触发模型调用。
+新稿件的inputFormat为plain，sourceText保存原文、body保存整理后的Markdown；旧API缺省markdown，不强迫其他agent已写好的Markdown再次调用模型。原文和图片顺序的指纹由引擎计算，客户端不能提交；formatReady为派生公开状态。整理任务有revision及requestId校验，结果写入前再次核对版本，取消／失败／过期结果不覆盖原文。保存、预览、切换账号或模板均不触发模型调用。文章右上角“预览”打开弹窗，按本次发布账号查看模板及平台效果；关闭预览不保存或丢弃编辑。
 
 原文整理另启动固定版本的 `easy-publish-opencode`。该进程使用应用独立 HOME／XDG／临时会话目录、仅绑定 loopback 的随机端口和随机 Basic 认证，不继承个人模型凭据或 OpenCode 配置。仅核验零费用模型后发送纯文本，不提供工具、MCP、技能或插件；具体调用与打包边界见 [桌面说明](desktop.md)。设置页检查不发送文章，免费目录可用不代表下一次请求一定成功。
 
