@@ -8,6 +8,8 @@ import json
 import os
 from pathlib import Path
 import queue
+import socket
+import socketserver
 import subprocess
 import sys
 import threading
@@ -330,12 +332,19 @@ def test_descriptor_rejects_shared_permissions_and_symlinks(tmp_path):
 
 @contextmanager
 def http_fixture(handler):
+    class LoopbackServer(ThreadingHTTPServer):
+        def server_bind(self):
+            # These fixtures bind a numeric loopback address. Avoid HTTPServer's
+            # reverse DNS lookup, which can stall macOS runners for ~35 seconds.
+            socketserver.TCPServer.server_bind(self)
+            self.server_name, self.server_port = self.server_address[:2]
+
     class Handler(BaseHTTPRequestHandler):
         def do_POST(self):
             handler(self)
         def log_message(self, *args):
             pass
-    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    server = LoopbackServer(("127.0.0.1", 0), Handler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
@@ -344,6 +353,18 @@ def http_fixture(handler):
         server.shutdown()
         thread.join(5)
         server.server_close()
+
+
+def test_loopback_http_fixture_never_performs_reverse_dns(monkeypatch):
+    def unexpected_dns(*args, **kwargs):
+        raise AssertionError("A loopback-only fixture must not perform reverse DNS")
+    monkeypatch.setattr(socket, "getfqdn", unexpected_dns)
+    def handler(request):
+        request.send_response(204)
+        request.end_headers()
+    with http_fixture(handler) as port:
+        with httpx.Client(trust_env=False, timeout=3) as client:
+            assert client.post(f"http://127.0.0.1:{port}/fixture").status_code == 204
 
 
 def test_real_stdio_initialize_discovery_and_scoped_tool_call(tmp_path):

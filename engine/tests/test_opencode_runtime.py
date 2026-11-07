@@ -12,11 +12,21 @@ from easy_publish import opencode_runtime as runtime
 
 CHILD = r'''
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-import base64, json, os, time
+import base64, json, os, socket, socketserver, time
 from pathlib import Path
 MODE = __MODE__
 REPORT = Path(__REPORT__)
 config = json.loads(os.environ['OPENCODE_CONFIG_CONTENT'])
+if MODE == 'no_dns':
+    def unexpected_dns(*args, **kwargs):
+        raise AssertionError('A loopback-only fixture must not perform reverse DNS')
+    socket.getfqdn = unexpected_dns
+class LoopbackServer(ThreadingHTTPServer):
+    def server_bind(self):
+        # HTTPServer.server_bind calls getfqdn even for 127.0.0.1. macOS
+        # runners can spend ~35 seconds in that unrelated DNS lookup.
+        socketserver.TCPServer.server_bind(self)
+        self.server_name, self.server_port = self.server_address[:2]
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *args): pass
     def send_json(self, data, status=200):
@@ -59,7 +69,7 @@ class Handler(BaseHTTPRequestHandler):
             if MODE == 'truncated': result['info']['finish'] = 'length'
             return self.send_json(result)
         self.send_json({},404)
-server = ThreadingHTTPServer(('127.0.0.1',0),Handler)
+server = LoopbackServer(('127.0.0.1',0),Handler)
 print('opencode server listening on http://127.0.0.1:'+str(server.server_port),flush=True)
 server.serve_forever()
 '''
@@ -119,6 +129,12 @@ def test_real_child_contract_retains_text_and_uses_only_isolated_state(fake_runt
     assert '【图片1】' in calls[-1]['body']['system']
     assert all(process.returncode is not None for process in children)
     assert list(formatter.root.glob('format-*')) == []
+
+
+def test_loopback_child_startup_does_not_depend_on_reverse_dns(fake_runtime):
+    formatter, _, _, children = fake_runtime('no_dns')
+    assert asyncio.run(formatter.format('正文【图片1】')) == '## 测试文章\n\n保留原文和【图片1】。'
+    assert children[0].returncode is not None
 
 
 @pytest.mark.parametrize('mode', ['paid','missing','managed_mcp','managed_prompt','version'])
