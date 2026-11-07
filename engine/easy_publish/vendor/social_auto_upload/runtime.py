@@ -4,6 +4,8 @@ from __future__ import annotations
 from contextvars import ContextVar
 from typing import Callable
 
+from easy_publish.browser import browser_launch_options
+
 # A worker serves one operation. ContextVar still prevents nested test sessions
 # from sharing mutation callbacks.
 browser_path: str | None = None
@@ -21,3 +23,7 @@ def before_mutation() -> None:
     if hook is None:
         raise RuntimeError("Publisher worker has not configured its mutation supervisor")
     hook()
+
+
+def browser_options(*, headless: bool = False) -> dict:
+    return browser_launch_options(browser_path, headless=headless, channel="chromium")

@@ -189,7 +189,7 @@ class ZhihuArticle:
 
         async with async_playwright() as playwright:
             browser = await playwright.chromium.launch(
-                executable_path=runtime.browser_path, channel="chromium", headless=self.headless,
+                **runtime.browser_options(headless=self.headless),
             )
             page = None
             submitted = False

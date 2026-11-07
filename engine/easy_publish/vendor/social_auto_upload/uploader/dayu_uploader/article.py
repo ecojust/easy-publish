@@ -260,7 +260,7 @@ class DayuArticle:
         result_file.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
         async with async_playwright() as playwright:
             browser = await playwright.chromium.launch(
-                executable_path=runtime.browser_path, channel="chromium", headless=self.headless,
+                **runtime.browser_options(headless=self.headless),
             )
             page = None
             try:

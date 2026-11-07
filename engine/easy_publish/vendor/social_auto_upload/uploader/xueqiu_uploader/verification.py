@@ -112,7 +112,7 @@ async def verify_xueqiu_result(account_file, result_file, headless=False):
     elif result.get("error"):
         raise ValueError("旧结果缺少原稿路径且保留核对错误，请先在后台核查原作品，勿重新发表")
     async with async_playwright() as p:
-        browser = await p.chromium.launch(executable_path=runtime.browser_path, channel="chromium", headless=headless)
+        browser = await p.chromium.launch(**runtime.browser_options(headless=headless))
         try:
             context = await browser.new_context(storage_state=str(account_file))
             page = await context.new_page()

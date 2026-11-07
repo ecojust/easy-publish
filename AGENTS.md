@@ -14,7 +14,7 @@
 
 - 当前项目为 Tauri 2 + React / TypeScript 桌面应用与打包 Python 3.12 发布引擎；目标为 macOS Apple Silicon、macOS Intel、Windows x64。文章与视频分别管理与发布。结构与开发命令见 `README.md`、`docs/architecture.md` 和 `docs/desktop.md`。
 - `src/` 为界面与共享类型，`src-tauri/` 为原生宿主和受限 IPC，`engine/easy_publish/` 为本地 API、SQLite、加密凭据、受监管 worker 与平台适配，`engine/tests/` 为隔离测试；`.github/workflows/build.yml` 负责三个目标系统的构建和安装包启动检查。
-- 维护接口时同步共享类型和架构文档。账号密码、cookie、token 不进入前端状态、SQLite 或日志；生产凭据使用系统钥匙串／凭据管理器保护的加密库。测试密钥只允许显式测试环境。
+- 维护接口时同步共享类型和架构文档。账号密码、cookie、token 不进入前端状态、SQLite 或日志；生产凭据使用应用数据目录内的 AES-GCM 加密库和本地密钥；按用户要求，不访问系统钥匙串／凭据管理器，也不导入个人浏览器资料。旧版密文保留，不能为迁移而读取系统凭据库。测试密钥只允许显式测试环境。
 - 平台能力以 `catalog.py` 及适配器为准：文章不能与图片笔记混淆；草稿、已提交审核、确认发布和结果不明必须分别表示。提交前需持久化 fence 并收到宿主确认；结果不明不得自动重发。开发验证使用 fixture，真实账号发布需用户明确授权。
 - MCP 使用内置引擎的 `--mcp` 入口，复用正在运行的桌面内容库和发布队列；保持专用凭据、路由隔离及文章／视频账号约束。配置入口和客户端使用方式见 `docs/mcp.md`。
 - 文章预览与发布复用 `article_templates.py` 的安全转换，模板选择保存在稿件及批次快照中。再次发布使用新请求编号；同一次调用重试复用原编号，默认排除已有提交／发布／未知结果的平台。

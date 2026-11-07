@@ -21,6 +21,15 @@ def check_bundled_driver(binary: Path, directory: Path) -> None:
     from PyInstaller.archive.readers import CArchiveReader
 
     archive = CArchiveReader(str(binary))
+    # Fail packaging if a future dependency accidentally reintroduces system
+    # credential-store access, including inside the embedded Python archive.
+    for name, entry in archive.toc.items():
+        if name == "keyring" or name.startswith(("keyring/", "keyring.", "keyring-")):
+            raise RuntimeError("System keyring must not be bundled")
+        if entry[-1] == "z":
+            modules = archive.open_embedded_archive(name).toc
+            if any(module == "keyring" or module.startswith("keyring.") for module in modules):
+                raise RuntimeError("System keyring must not be bundled")
     for name, entry in archive.toc.items():
         normalized = name.replace("\\", "/")
         if not normalized.startswith("patchright/driver/"):
@@ -90,7 +99,8 @@ def main() -> None:
             "--workpath", str(scratch_path / "work"), "--specpath", str(scratch_path),
             # Includes Patchright's platform-specific Node driver and package data.
             "--collect-all", "patchright", "--collect-all", "easy_publish",
-            "--collect-submodules", "keyring.backends", "--copy-metadata", "keyring",
+            # Account keys live only in the application's private data directory.
+            "--exclude-module", "keyring",
             # Uvicorn resolves protocol and event-loop implementations by module name.
             "--collect-submodules", "uvicorn",
         ]

@@ -48,7 +48,7 @@ async def login_zhihu_account(account_file: str | Path, timeout: int = 600) -> d
     account_file = Path(account_file).resolve()
     async with async_playwright() as playwright:
         browser = await playwright.chromium.launch(
-            executable_path=runtime.browser_path, channel="chromium", headless=False,
+            **runtime.browser_options(headless=False),
         )
         try:
             context = await browser.new_context(timezone_id="Asia/Shanghai")
@@ -75,7 +75,7 @@ async def check_zhihu_account(account_file: str | Path, headless: bool = True) -
     expected = load_zhihu_identity(account_file)
     async with async_playwright() as playwright:
         browser = await playwright.chromium.launch(
-            executable_path=runtime.browser_path, channel="chromium", headless=headless,
+            **runtime.browser_options(headless=headless),
         )
         try:
             context = await browser.new_context(storage_state=str(account_file), timezone_id="Asia/Shanghai")

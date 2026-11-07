@@ -44,7 +44,7 @@ async def login_dayu_account(account_file: str | Path, expected_name: str | None
     account_file = Path(account_file).resolve()
     async with async_playwright() as playwright:
         browser = await playwright.chromium.launch(
-            executable_path=runtime.browser_path, channel="chromium", headless=False,
+            **runtime.browser_options(headless=False),
         )
         try:
             context = await browser.new_context()
@@ -73,7 +73,7 @@ async def check_dayu_account(account_file: str | Path) -> bool:
     expected = load_dayu_identity(account_file)
     async with async_playwright() as playwright:
         browser = await playwright.chromium.launch(
-            executable_path=runtime.browser_path, channel="chromium", headless=True,
+            **runtime.browser_options(headless=True),
         )
         try:
             context = await browser.new_context(storage_state=str(account_file))

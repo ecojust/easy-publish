@@ -6,15 +6,13 @@ on:
       tag:
         description: Existing release tag
         required: true
-        default: v0.1.3
+        default: v0.1.4
       build_run_id:
         description: Successful desktop build run containing all three installers
         required: true
-        default: "42260406561"
       expected_source_sha:
         description: Exact application source commit used by that build
         required: true
-        default: "4017cf74b93ca68ad484207b94f36aba2949bfd6"
 
 permissions:
   actions: read

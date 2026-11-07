@@ -12,6 +12,7 @@ from pathlib import Path
 import re
 from urllib.parse import urlsplit
 
+from ..browser import browser_launch_options
 from .base import ProviderContext, ProviderResult, PublishPayload
 
 
@@ -238,10 +239,7 @@ async def _visible(locator) -> bool:
 async def _browser(ctx: ProviderContext, state: dict | None = None):
     from patchright.async_api import async_playwright
     async with async_playwright() as driver:
-        options = {"headless": False}
-        if ctx.browser_path:
-            options["executable_path"] = ctx.browser_path
-        browser = await driver.chromium.launch(**options)
+        browser = await driver.chromium.launch(**browser_launch_options(ctx.browser_path))
         try:
             config = {"locale": "zh-CN", "timezone_id": "Asia/Shanghai"}
             if state is not None:

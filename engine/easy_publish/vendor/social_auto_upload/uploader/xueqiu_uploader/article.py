@@ -203,7 +203,7 @@ class XueqiuArticle:
                   "result_file": str(result_file), "remote_draft_possible": False}
         async with async_playwright() as playwright:
             browser = await playwright.chromium.launch(
-                executable_path=runtime.browser_path, channel="chromium", headless=self.headless,
+                **runtime.browser_options(headless=self.headless),
             )
             page = None
             try:

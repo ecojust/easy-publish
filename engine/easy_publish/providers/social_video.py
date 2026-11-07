@@ -13,6 +13,7 @@ from pathlib import Path
 import re
 from urllib.parse import urlsplit
 
+from ..browser import browser_launch_options
 from .base import ProviderContext, ProviderResult, PublishPayload
 
 
@@ -390,10 +391,7 @@ async def _browser_page(ctx: ProviderContext, *, load_session: bool = True):
     # Import lazily so validation and protocol tests do not require a browser.
     from patchright.async_api import async_playwright
     async with async_playwright() as driver:
-        options = {"headless": False}
-        if ctx.browser_path:
-            options["executable_path"] = ctx.browser_path
-        browser = await driver.chromium.launch(**options)
+        browser = await driver.chromium.launch(**browser_launch_options(ctx.browser_path))
         try:
             options = {"locale": "zh-CN", "timezone_id": "Asia/Shanghai"}
             if load_session and ctx.session_path.is_file():

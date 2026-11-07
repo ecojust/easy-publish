@@ -1,6 +1,6 @@
 # 桌面外壳与安装包
 
-Easy Publish 使用 Tauri 2 系统 WebView。macOS ARM、macOS Intel 与 Windows x64 分别构建原生安装包，版本为 `0.1.3`。macOS 最低为 13.5；Windows 为 Windows 10／11 x64。该下限匹配内置 Patchright 驱动的 [Node.js 24 系统要求](https://github.com/nodejs/node/blob/v24.13.0/BUILDING.md#platform-list)。Python 3.12 发布引擎由 PyInstaller 打包并随应用安装，用户无需安装 Python。发布浏览器由引擎管理，首次使用在应用中准备。
+Easy Publish 使用 Tauri 2 系统 WebView。macOS ARM、macOS Intel 与 Windows x64 分别构建原生安装包，版本为 `0.1.4`。macOS 最低为 13.5；Windows 为 Windows 10／11 x64。该下限匹配内置 Patchright 驱动的 [Node.js 24 系统要求](https://github.com/nodejs/node/blob/v24.13.0/BUILDING.md#platform-list)。Python 3.12 发布引擎由 PyInstaller 打包并随应用安装，用户无需安装 Python。发布浏览器由引擎管理，首次使用在应用中准备。
 
 ## 开发
 
@@ -28,7 +28,7 @@ python scripts/smoke-engine.py src-tauri/binaries/easy-publish-engine-<Rust targ
 npm run tauri -- build
 ```
 
-Windows 独立引擎文件名另有 `.exe` 后缀。构建脚本收集 Patchright Node 驱动、平台驱动、许可证和系统凭据后端，不包含用户登录数据。应用数据位于系统应用数据目录 `com.ecojust.easy-publish`。
+Windows 独立引擎文件名另有 `.exe` 后缀。构建脚本收集 Patchright Node 驱动、平台驱动和许可证，明确排除 keyring，不包含用户登录数据。账号加密密钥和会话仅保存在本应用目录，启动不访问系统钥匙串。应用数据位于系统应用数据目录 `com.ecojust.easy-publish`。
 
 工作流 `.github/workflows/build.yml` 对三个目标分别执行前端检查、Python 测试、Rust 核心测试、冻结引擎启动检查、Tauri 打包和原生宿主 `--smoke-test`。最后上传安装包为工作流 artifact；Release 由独立的手动发布工作流转存已验证产物，不重复编译。原生启动检查启动内置引擎、读取带认证的状态、确认版本和正常关闭；它不证明真实平台账号登录或发布成功。
 

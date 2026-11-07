@@ -207,6 +207,28 @@ def verify(binary: Path, timeout: int, expected_version: str, clean_environment:
                     raise RuntimeError(f"State is missing its {field} list")
             if not state["platforms"] or state.get("runtime", {}).get("version") != expected_version:
                 raise RuntimeError("Platform catalog or engine version did not match")
+            if state["runtime"].get("vaultReady") is not True:
+                raise RuntimeError("App-owned account storage did not start without a system keyring")
+            key_path = Path(directory) / "vault-local-v1/master.key"
+            if not key_path.is_file() or key_path.stat().st_size != 32:
+                raise RuntimeError("App-owned encryption key is missing or invalid")
+            # Saving dummy credentials stays offline: do not connect or publish.
+            fixture_secret = "offline-package-check-not-a-real-secret"
+            status, account = request(port, "/api/accounts", token, "POST", {
+                "platformId": "wechat", "label": "离线存储检查",
+                "credentials": {"appId": "offline-smoke", "appSecret": fixture_secret},
+            })
+            if status != 200 or not account.get("credentialConfigured") or not isinstance(account.get("id"), str):
+                raise RuntimeError("Frozen engine could not store app-owned account credentials")
+            encrypted_files = list(key_path.parent.glob("*.enc"))
+            if len(encrypted_files) != 1:
+                raise RuntimeError("App-owned encrypted credential file is missing")
+            encrypted = encrypted_files[0].read_bytes()
+            if not encrypted.startswith(b"EPV1") or fixture_secret.encode() in encrypted or fixture_secret in json.dumps(account):
+                raise RuntimeError("Credentials escaped the encrypted app-owned store")
+            status, deleted_account = request(port, f"/api/accounts/{account['id']}", token, "DELETE")
+            if status != 200 or not deleted_account.get("ok") or encrypted_files[0].exists():
+                raise RuntimeError("Offline account cleanup failed")
             for platform_id in ("bilibili", "kuaishou"):
                 platform = next((item for item in state["platforms"] if item.get("id") == platform_id), {})
                 if platform.get("kinds") != ["video"] or platform.get("modes") != ["publish"]:
@@ -263,14 +285,14 @@ def verify(binary: Path, timeout: int, expected_version: str, clean_environment:
                     child.kill()
                     child.wait(timeout=5)
             child.stdout.close()
-    print("Embedded engine smoke passed: startup, authentication, UTF-8 content, Bilibili/Kuaishou workers, stdio MCP and template preview, graceful shutdown.")
+    print("Embedded engine smoke passed: startup, app-owned encrypted accounts, authentication, UTF-8 content, Bilibili/Kuaishou workers, stdio MCP and template preview, graceful shutdown.")
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("binary", type=Path)
     parser.add_argument("--timeout", type=int, default=120)
-    parser.add_argument("--expected-version", default="0.1.3")
+    parser.add_argument("--expected-version", default="0.1.4")
     parser.add_argument("--clean-environment", action="store_true", help="Use a minimal macOS application environment without developer runtime paths")
     args = parser.parse_args()
     try:

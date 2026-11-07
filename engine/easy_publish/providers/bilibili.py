@@ -20,6 +20,7 @@ from urllib.parse import parse_qsl, urlsplit
 import httpx
 from PIL import Image, ImageOps
 
+from ..browser import browser_launch_options
 from .base import ProviderContext, ProviderResult, PublishPayload
 
 NAV = "https://api.bilibili.com/x/web-interface/nav"
@@ -183,10 +184,7 @@ async def _categories(client: httpx.AsyncClient) -> list[dict[str, str]]:
 async def _browser(ctx: ProviderContext):
     from patchright.async_api import async_playwright
     async with async_playwright() as driver:
-        options = {"headless": False}
-        if ctx.browser_path:
-            options["executable_path"] = ctx.browser_path
-        browser = await driver.chromium.launch(**options)
+        browser = await driver.chromium.launch(**browser_launch_options(ctx.browser_path))
         try:
             context = await browser.new_context(locale="zh-CN", timezone_id="Asia/Shanghai", user_agent=USER_AGENT)
             page = await context.new_page()

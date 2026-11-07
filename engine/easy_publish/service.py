@@ -10,6 +10,7 @@ from urllib.parse import urlsplit
 from easy_publish.catalog import BY_ID, PLATFORMS, bilibili_categories
 from easy_publish.content import ContentInput, image_sources, render_article
 from easy_publish.store import Store, dump, now, uid
+from easy_publish.vault import VaultError
 
 
 class Problem(Exception):
@@ -34,7 +35,27 @@ class Service:
 
     async def start(self):
         self.store.recover()
+        self._reconcile_account_storage()
         self.queue_task = asyncio.create_task(self.queue_loop())
+
+    def _reconcile_account_storage(self):
+        """Keep legacy accounts visible without trying to unlock their old keys."""
+        vault = self.runtime.vault
+        if not vault.ready:
+            return
+        for account in self.store.all("SELECT * FROM accounts"):
+            api_account = BY_ID[account["platform"]]["auth"] == "wechat_api"
+            kind = "credentials" if api_account else "session"
+            if not vault.requires_reconnect(account["id"], kind):
+                continue
+            message = ("旧版公众号凭据未读取；请移除此本地账号后重新添加 AppID 和 AppSecret"
+                       if api_account else "旧版登录会话未读取，请重新登录；以后只使用应用内保存的会话")
+            configured = 0 if api_account else account["configured"]
+            with self.store.transaction() as db:
+                db.execute("DELETE FROM account_metadata WHERE account_id=?", (account["id"],))
+                if (account["status"], account["message"], account["configured"]) != ("login_required", message, configured):
+                    db.execute("UPDATE accounts SET status='login_required',message=?,configured=?,updated=? WHERE id=?",
+                               (message, configured, now(), account["id"]))
 
     async def close(self):
         self.closing = True
@@ -126,6 +147,13 @@ class Service:
             raise Problem("此账号已有进行中的任务", "account_busy", 409)
         if not self.runtime.vault.ready:
             raise Problem(self.runtime.vault.message, "vault_unavailable", 503)
+        if BY_ID[account["platform"]]["auth"] == "wechat_api":
+            try:
+                configured = bool(self.runtime.vault.get(identifier, "credentials"))
+            except VaultError:
+                configured = False
+            if not configured:
+                raise Problem("应用内没有可用的公众号凭据，请移除此本地账号后重新添加 AppID 和 AppSecret", "credentials_required")
         if BY_ID[account["platform"]]["auth"] == "browser" and not self.runtime.state()["browserReady"]:
             raise Problem("请先在设置中安装发布浏览器", "browser_required")
         with self.store.transaction() as db:
@@ -165,7 +193,7 @@ class Service:
         if not content["title"].strip():
             common.append("请填写标题")
         if not self.runtime.vault.ready:
-            common.append("系统凭据存储不可用，请在设置中检查")
+            common.append("应用内账号存储不可用，请在设置中检查")
         if content["kind"] == "article" and not content["body"].strip():
             common.append("请填写文章正文")
         if content["kind"] == "video" and not content["videoAssetId"]:
