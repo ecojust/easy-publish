@@ -25,8 +25,10 @@ export default function App() {
   const inFlight = useRef<Promise<void> | null>(null);
   const mounted = useRef(true);
 
-  const refresh = useCallback(async () => {
-    if (inFlight.current) return inFlight.current;
+  const refresh = useCallback(async (force = true) => {
+    if (inFlight.current && !force) return inFlight.current;
+    // Mutations need a snapshot requested after they finish, not an older poll.
+    while (inFlight.current) await inFlight.current;
     const operation = (async () => {
       try {
         const next = await request<AppState>("GET", "/api/state");
@@ -44,7 +46,7 @@ export default function App() {
   useEffect(() => {
     mounted.current = true;
     void refresh();
-    const timer = window.setInterval(() => { void refresh(); }, 2500);
+    const timer = window.setInterval(() => { void refresh(false); }, 2500);
     return () => { mounted.current = false; window.clearInterval(timer); };
   }, [refresh]);
 
@@ -67,11 +69,11 @@ export default function App() {
       {!state ? <div className="startup-screen"><div className="startup-graphic">{loading ? <Spinner size={35} /> : <AlertCircle size={35} />}</div><h1>{loading ? "正在打开你的工作空间" : "暂时无法连接发布引擎"}</h1><p>{loading ? "正在读取本地稿件和账号状态…" : connectionError}</p>{!loading && <button className="button primary" onClick={() => { setLoading(true); void refresh(); }}><RefreshCw size={16} />重新连接</button>}</div> : <>
         {connectionError && <div className="connection-banner" role="alert"><AlertCircle size={16} /><span>本地引擎连接中断，当前显示上次状态。{connectionError}</span><button className="text-button" onClick={() => { void refresh(); }}>重试</button></div>}
         {/* Keep both composers mounted so navigation preserves unsaved edits. */}
-        <div hidden={view !== "article"}><DraftWorkspace kind="article" contents={state.contents} platforms={state.platforms} accounts={state.accounts} articleTemplates={state.articleTemplates} onRefresh={refresh} onAccounts={() => setView("accounts")} onTasks={() => setView("tasks")} onNotice={setNotice} /></div>
-        <div hidden={view !== "video"}><DraftWorkspace kind="video" contents={state.contents} platforms={state.platforms} accounts={state.accounts} articleTemplates={state.articleTemplates} onRefresh={refresh} onAccounts={() => setView("accounts")} onTasks={() => setView("tasks")} onNotice={setNotice} /></div>
+        <div hidden={view !== "article"}><DraftWorkspace kind="article" contents={state.contents} platforms={state.platforms} accounts={state.accounts} articleTemplates={state.articleTemplates} onRefresh={refresh} formatting={state.formatting} onSettings={() => setView("settings")} onAccounts={() => setView("accounts")} onTasks={() => setView("tasks")} onNotice={setNotice} /></div>
+        <div hidden={view !== "video"}><DraftWorkspace kind="video" contents={state.contents} platforms={state.platforms} accounts={state.accounts} articleTemplates={state.articleTemplates} onRefresh={refresh} formatting={state.formatting} onSettings={() => setView("settings")} onAccounts={() => setView("accounts")} onTasks={() => setView("tasks")} onNotice={setNotice} /></div>
         {view === "tasks" && <TasksPage batches={state.batches} platforms={state.platforms} onRefresh={refresh} onNotice={setNotice} />}
-        {view === "accounts" && <AccountsPage accounts={state.accounts} platforms={state.platforms} runtime={state.runtime} onRefresh={refresh} onNotice={setNotice} onSettings={() => setView("settings")} />}
-        {view === "settings" && <SettingsPage runtime={state.runtime} onRefresh={refresh} />}
+        {view === "accounts" && <AccountsPage articleTemplates={state.articleTemplates} accounts={state.accounts} platforms={state.platforms} runtime={state.runtime} onRefresh={refresh} onNotice={setNotice} onSettings={() => setView("settings")} />}
+        {view === "settings" && <SettingsPage formatting={state.formatting} runtime={state.runtime} onRefresh={refresh} />}
       </>}
       {state && !state.runtime.browserReady && view !== "settings" && view !== "accounts" && <button className="runtime-shortcut" onClick={() => setView("settings")}><span className="setup-dot" />{state.runtime.browserInstalling ? "正在准备发布浏览器" : "完成首次环境准备"}<ArrowUpRight size={14} /></button>}
     </main>

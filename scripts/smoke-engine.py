@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -163,6 +164,17 @@ def check_mcp(binary: Path, environment: dict[str, str], directory: Path, port: 
 def verify(binary: Path, timeout: int, expected_version: str, clean_environment: bool = False) -> None:
     if not binary.is_file():
         raise RuntimeError("Embedded engine binary does not exist")
+    # Check the exact sibling shipped alongside this engine, never an executable on PATH.
+    opencode = binary.with_name(binary.name.replace("easy-publish-engine", "easy-publish-opencode", 1))
+    if opencode == binary or not opencode.is_file() or opencode.is_symlink():
+        raise RuntimeError("Bundled OpenCode sibling is missing or invalid")
+    spec = importlib.util.spec_from_file_location("prepare_opencode", Path(__file__).with_name("prepare-opencode.py"))
+    preparation = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(preparation)
+    manifest, _ = preparation.pinned_target(preparation.native_target())
+    preparation.verify_architecture(opencode, preparation.native_target())
+    preparation.smoke_version(opencode, manifest["version"])
+    preparation.smoke_server(opencode, manifest["version"])
     with tempfile.TemporaryDirectory(prefix="easy-publish-engine-smoke-") as directory:
         environment = os.environ.copy()
         if clean_environment:
@@ -173,6 +185,7 @@ def verify(binary: Path, timeout: int, expected_version: str, clean_environment:
         environment.pop("PYTHONHOME", None)
         environment.pop("EASY_PUBLISH_TESTING", None)
         environment.pop("EASY_PUBLISH_TEST_KEY", None)
+        environment["EASY_PUBLISH_OPENCODE_PATH"] = str(opencode)
         child = subprocess.Popen(
             [str(binary), "--data-dir", directory, "--parent-pid", str(os.getpid())], stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL, env=environment,
@@ -285,14 +298,14 @@ def verify(binary: Path, timeout: int, expected_version: str, clean_environment:
                     child.kill()
                     child.wait(timeout=5)
             child.stdout.close()
-    print("Embedded engine smoke passed: startup, app-owned encrypted accounts, authentication, UTF-8 content, Bilibili/Kuaishou workers, stdio MCP and template preview, graceful shutdown.")
+    print("Embedded engine smoke passed: bundled OpenCode version, startup, app-owned encrypted accounts, authentication, UTF-8 content, Bilibili/Kuaishou workers, stdio MCP and template preview, graceful shutdown.")
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("binary", type=Path)
     parser.add_argument("--timeout", type=int, default=120)
-    parser.add_argument("--expected-version", default="0.1.5")
+    parser.add_argument("--expected-version", default="0.1.6")
     parser.add_argument("--clean-environment", action="store_true", help="Use a minimal macOS application environment without developer runtime paths")
     args = parser.parse_args()
     try:

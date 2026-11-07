@@ -88,7 +88,7 @@ export function ArticleTemplateThumbnail({ templateId }: { templateId: ArticleTe
   return <span className="template-swatch" aria-hidden="true">{html ? <span className="template-miniature" dangerouslySetInnerHTML={{ __html: html }} /> : <span className="template-miniature-placeholder">{failed ? "Aa" : <Spinner />}</span>}</span>;
 }
 
-export default function MarkdownPreview({ source, assetIds, templateId, platformId, onError }: { source: string; assetIds: string[]; templateId: ArticleTemplateId; platformId?: string; onError: (message: string) => void }) {
+export default function MarkdownPreview({ source, assetIds, templateId, platformId, accountId, onError }: { source: string; assetIds: string[]; templateId: ArticleTemplateId; platformId?: string; accountId?: string; onError: (message: string) => void }) {
   const [images, setImages] = useState<Record<string, string>>({});
   const [rendered, setRendered] = useState<{ html: string; notes: string[] }>({ html: "", notes: [] });
   const [loading, setLoading] = useState(true);
@@ -113,12 +113,12 @@ export default function MarkdownPreview({ source, assetIds, templateId, platform
     setFailure(null);
     if (!source.trim()) { setRendered({ html: "", notes: [] }); setLoading(false); return; }
     setLoading(true);
-    request<{ html: string; notes: string[] }>("POST", "/api/preview/article", { body: source, articleTemplateId: templateId, ...(platformId ? { platformId } : {}) })
+    request<{ html: string; notes: string[] }>("POST", "/api/preview/article", { body: source, articleTemplateId: templateId, ...(platformId ? { platformId } : {}), ...(accountId ? { accountId } : {}) })
       .then((result) => { if (active) setRendered(result); })
       .catch((cause) => { if (active) setFailure(errorMessage(cause)); })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
-  }, [source, templateId, platformId, retry]);
+  }, [source, templateId, platformId, accountId, retry]);
   useEffect(() => {
     let active = true;
     const ids = idsKey ? idsKey.split(",") : [];

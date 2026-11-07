@@ -95,12 +95,17 @@ jobs:
           npm ci
           python -m pip install -r engine/requirements-dev.txt pyinstaller==6.22.3 pytest==8.4.2
       - name: Check frontend and engine
+        timeout-minutes: 6
         run: |
           npm run check
           npm run build
-          python -m pytest engine/tests -q
+          python -m pytest engine/tests -vv -o faulthandler_timeout=45
         env:
           PYTHONPATH: engine
+      - name: Verify pinned OpenCode preparation guards
+        run: python -m unittest discover -s scripts/tests -p test_prepare_opencode.py
+      - name: Prepare embedded OpenCode
+        run: python scripts/prepare-opencode.py --target "${{ matrix.target }}"
       - name: Build embedded engine
         run: python scripts/build-engine.py --target "${{ matrix.target }}"
       - name: Check embedded engine without developer Python paths
@@ -122,16 +127,19 @@ jobs:
           hdiutil attach -readonly -nobrowse -mountpoint "$mount_dir" "${dmg_files[0]}"
           ditto "$mount_dir/Easy Publish.app" "$copy_dir/Easy Publish.app"
           app_path="$copy_dir/Easy Publish.app"
-          python scripts/check-macos-signature.py "$app_path" "$app_path/Contents/MacOS/easy-publish-engine"
+          python scripts/check-macos-signature.py "$app_path" "$app_path/Contents/MacOS/easy-publish-engine" "$app_path/Contents/MacOS/easy-publish-opencode"
+          python scripts/prepare-opencode.py --target "${{ matrix.target }}" --check "$app_path/Contents/MacOS/easy-publish-opencode"
           python scripts/smoke-engine.py "$app_path/Contents/MacOS/easy-publish-engine" --clean-environment
           env -i HOME="$HOME" USER="$USER" LOGNAME="$LOGNAME" TMPDIR="$TMPDIR" PATH=/usr/bin:/bin:/usr/sbin:/sbin LANG=en_US.UTF-8 "$app_path/Contents/MacOS/easy-publish" --smoke-test
       - name: Verify Windows native embedded startup
         if: runner.os == 'Windows'
-        run: '"src-tauri/target/${{ matrix.target }}/release/easy-publish.exe" --smoke-test'
+        run: |
+          python scripts/prepare-opencode.py --target "${{ matrix.target }}" --check "src-tauri/target/${{ matrix.target }}/release/easy-publish-opencode.exe"
+          "src-tauri/target/${{ matrix.target }}/release/easy-publish.exe" --smoke-test
       - name: Upload desktop artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: easy-publish-0.1.5-${{ matrix.artifact }}
+          name: easy-publish-0.1.6-${{ matrix.artifact }}
           path: |
             src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg
             src-tauri/target/${{ matrix.target }}/release/bundle/nsis/*-setup.exe

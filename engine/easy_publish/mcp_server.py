@@ -66,6 +66,7 @@ class PreviewArticle(Arguments):
     body: str = Field(max_length=500_000)
     articleTemplateId: ArticleTemplateId = "clean"
     platformId: Literal["wechat", "zhihu", "dayu", "xueqiu"] | None = None
+    accountId: str | None = Field(default=None, min_length=1, max_length=128)
 
 
 class Selection(ContentId):
@@ -92,11 +93,11 @@ TOOL_DEFINITIONS = [
     ("list_accounts", "List accounts compatible with the requested content kind; connected accounts only by default. Includes defaultSelected, the desktop preference for automatic selection; accounts with it disabled remain listed. Article accounts cannot publish videos and video accounts cannot publish articles.", AccountFilter, True),
     ("list_contents", "List local content summaries and platform publication states. Already submitted, published or uncertain platforms are excluded from automatic publish selection.", ContentFilter, True),
     ("get_content", "Read a saved local article/video and its current platform publication states.", ContentId, True),
-    ("save_content", "Create or update a LOCAL draft. Supply content.kind explicitly, Markdown for articles, and imported asset IDs for media. This does not publish. Use articleTemplateId to choose an article template.", SaveContent, False),
+    ("save_content", "Create or update a LOCAL draft. Supply content.kind explicitly, Markdown for articles, and imported asset IDs for media. This does not publish or invoke AI. Article inputFormat defaults to markdown. WeChat uses each account's configured template; articleTemplateId applies to other platforms and legacy data.", SaveContent, False),
     ("import_asset", "Import a user-authorized absolute local media or UTF-8 article path into Easy Publish. Returns an asset ID; article imports also return text. No platform upload occurs.", ImportAsset, False),
-    ("preview_article", "Render sanitized Markdown using an article template and optional target platform. Returns HTML and platform formatting notes without publishing.", PreviewArticle, True),
+    ("preview_article", "Render sanitized Markdown without publishing. Supply accountId for a WeChat account to preview its configured template, which overrides articleTemplateId. Without accountId, use articleTemplateId and optional platformId for legacy or non-WeChat previews. Returns HTML and formatting notes.", PreviewArticle, True),
     ("preflight", "Check saved content for selected accounts without publishing. Omit accountIds to use connected, compatible accounts with defaultSelected enabled on platforms without a previous submitted/published/unknown result. Explicit accountIds override the default-selection preference and allow intentional republication, but never cross article/video types.", Selection, True),
-    ("publish", "PUBLISH saved content (or create platform drafts when mode=draft) through connected compatible accounts. This uploads content to external platforms. Call only when publication is requested. requestId must be a UUID: reuse it after uncertainty in this tool call to retrieve the SAME batch with its original selection, even after account preferences change; use a NEW UUID for an intentional new publication. Omitted accountIds use defaultSelected accounts and exclude previous submitted/published/unknown platforms. Explicit accountIds override the default-selection preference and allow republication but never cross article/video types. Task results may be submitted, published, or unknown; never automatically resend unknown results.", Publish, False),
+    ("publish", "PUBLISH saved content (or create platform drafts when mode=draft) through connected compatible accounts. This uploads content to external platforms. Call only when publication is requested. requestId must be a UUID: reuse it after uncertainty in this tool call to retrieve the SAME batch with its original selection, even after account preferences change; use a NEW UUID for an intentional new publication. Omitted accountIds use defaultSelected accounts and exclude previous submitted/published/unknown platforms. Explicit accountIds override the default-selection preference and allow republication but never cross article/video types. The batch freezes each WeChat account's configured template. Task results may be submitted, published, or unknown; never automatically resend unknown results.", Publish, False),
     ("list_batches", "List publishing batches and per-account results. A submitted receipt is not proof that content is public. Pagination is available with offset/limit.", BatchFilter, True),
     ("get_batch", "Read one publishing batch and all per-account results, including older batches. Poll this after publish; do not publish again to poll.", BatchId, True),
     ("cancel_batch", "Cancel pending work in a batch. This cannot retract content already uploaded or submitted to a platform; uncertain submitted tasks remain unknown.", BatchId, False),
@@ -194,9 +195,7 @@ async def execute_tool(service, data_dir: Path, name: str, arguments: dict) -> d
             service.store.execute("INSERT INTO assets VALUES (?,?,?,?,?,?,?)", tuple(row[key] for key in ("id", "name", "kind", "size", "mime", "path", "text")))
             value = {"asset": service.store.asset(row)}
         elif name == "preview_article":
-            from .article_templates import article_format_notes
-            value = {"html": render_article(values.body, values.articleTemplateId, values.platformId),
-                     "notes": article_format_notes(values.platformId)}
+            value = service.preview_article(values.body, values.articleTemplateId, values.platformId, values.accountId)
         elif name in {"preflight", "publish"}:
             # Resolve replay before default filtering: after a successful first
             # attempt its platforms are intentionally no longer auto-selected,

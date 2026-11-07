@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { ArrowRight, Check, CheckCheck, ChevronRight, FileText, Film, ImagePlus, MoreHorizontal, Plus, Save, Search, Send, ShieldCheck, Trash2, Upload, X } from "lucide-react";
 import { bridge, errorMessage, request } from "./api";
-import MarkdownPreview, { ArticleTemplateThumbnail, AssetImage, useAssetMetadata } from "./MarkdownPreview";
+import MarkdownPreview, { AssetImage, useAssetMetadata } from "./MarkdownPreview";
+import ArticleWorkspace from "./ArticleWorkspace";
 import { byteLabel, dateLabel, InlineError, Modal, PlatformMark, Spinner } from "./ui";
-import type { Account, ArticleTemplate, Asset, Batch, Content, ContentInput, ContentKind, Platform, PlatformField, Preflight, PublishMode } from "./shared/types";
+import type { Account, ArticleTemplate, Asset, Batch, Content, ContentInput, ContentKind, FormattingState, Platform, PlatformField, Preflight, PublishMode } from "./shared/types";
 
-const newContent = (kind: ContentKind): ContentInput => ({ kind, title: "", body: "", description: "", tags: [], author: "", videoAssetId: null, coverAssetId: null, imageAssetIds: [], platformOptions: {}, articleTemplateId: "clean" });
-const asInput = (content: Content): ContentInput => ({ kind: content.kind, title: content.title, body: content.body, description: content.description, tags: content.tags, author: content.author, videoAssetId: content.videoAssetId, coverAssetId: content.coverAssetId, imageAssetIds: content.imageAssetIds, platformOptions: content.platformOptions || {}, articleTemplateId: content.articleTemplateId || "clean" });
+const newContent = (kind: ContentKind): ContentInput => ({ kind, inputFormat: "markdown", sourceText: "", title: "", body: "", description: "", tags: [], author: "", videoAssetId: null, coverAssetId: null, imageAssetIds: [], platformOptions: {}, articleTemplateId: "clean" });
+const asInput = (content: Content): ContentInput => ({ kind: content.kind, inputFormat: content.inputFormat || "markdown", sourceText: content.sourceText || "", title: content.title, body: content.body, description: content.description, tags: content.tags, author: content.author, videoAssetId: content.videoAssetId, coverAssetId: content.coverAssetId, imageAssetIds: content.imageAssetIds, platformOptions: content.platformOptions || {}, articleTemplateId: content.articleTemplateId || "clean" });
 
 function defaultTargets(content: Content | undefined, kind: ContentKind, accounts: Account[], platforms: Platform[], mode: PublishMode) {
   const history = content?.platformPublicationStates || {};
@@ -27,13 +28,19 @@ interface Props {
   platforms: Platform[];
   accounts: Account[];
   articleTemplates: ArticleTemplate[];
+  formatting: FormattingState;
+  onSettings: () => void;
   onRefresh: () => Promise<void>;
   onAccounts: () => void;
   onTasks: () => void;
   onNotice: (message: string) => void;
 }
 
-export default function DraftWorkspace({ kind, contents, platforms, accounts, articleTemplates, onRefresh, onAccounts, onTasks, onNotice }: Props) {
+export default function DraftWorkspace(props: Props) {
+  return props.kind === "article" ? <ArticleWorkspace {...props} /> : <VideoWorkspace {...props} />;
+}
+
+function VideoWorkspace({ kind, contents, platforms, accounts, onRefresh, onAccounts, onTasks, onNotice }: Props) {
   const entries = contents.filter((content) => content.kind === kind).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   const initial = entries[0];
   const [contentId, setContentId] = useState<string | null>(initial?.id || null);
@@ -242,7 +249,6 @@ export default function DraftWorkspace({ kind, contents, platforms, accounts, ar
           <div className="title-meta"><span>{article ? "好内容，从一个好标题开始" : "标题会同步到你选择的平台"}</span><span>{form.title.length} 字</span></div>
 
           {article ? <div className="article-body">
-            <div className="article-template-picker"><div className="section-label"><h3>文章模板</h3><span>选择版式，实时预览</span></div><div className="template-options" role="group" aria-label="文章模板">{articleTemplates.map((template) => <button type="button" key={template.id} className={`template-option ${form.articleTemplateId === template.id ? "selected" : ""}`} aria-pressed={form.articleTemplateId === template.id} onClick={() => { update("articleTemplateId", template.id); setTab("preview"); }}><ArticleTemplateThumbnail templateId={template.id} /><span><strong>{template.name}</strong><small>{template.description}</small></span>{form.articleTemplateId === template.id && <Check size={14} />}</button>)}</div></div>
             <div className="body-toolbar"><div className="segmented-control"><button className={tab === "edit" ? "active" : ""} onClick={() => setTab("edit")}>编辑</button><button className={tab === "preview" ? "active" : ""} onClick={() => setTab("preview")}>预览</button></div><div className="toolbar-actions"><span className="markdown-hint">Markdown</span><button className="icon-button" aria-label="导入文章文件" title="导入 Markdown / 文本" onClick={() => importFile("article")}><Upload size={16} /></button><button className="icon-button" aria-label="插入正文图片" title="插入正文图片" onClick={() => importFile("image", "body")}><ImagePlus size={16} /></button></div></div>
             {tab === "edit" ? <textarea ref={bodyRef} className="markdown-editor" aria-label="文章正文" placeholder={"从这里开始写作…\n\n支持 Markdown 格式：\n## 小标题\n**重点内容**\n\n点击右上角图片按钮，插入本地图片。"} value={form.body} onChange={(event) => update("body", event.target.value)} spellCheck={false} /> : <><label className="preview-platform"><span>预览效果</span><select aria-label="文章预览平台" value={previewPlatform} onChange={(event) => setPreviewPlatform(event.target.value)}><option value="">模板效果</option>{kindPlatforms.map((platform) => <option key={platform.id} value={platform.id}>{platform.name}</option>)}</select></label><MarkdownPreview source={form.body} assetIds={form.imageAssetIds} templateId={form.articleTemplateId} platformId={previewPlatform || undefined} onError={setError} /></>}
             <div className="editor-footer"><span>{form.body.length.toLocaleString()} 字符</span><span>正文图片通过导入按钮添加</span></div>

@@ -21,7 +21,7 @@ macOS ARM、Intel 和 Windows 安装包都提供该入口，普通用户不需�
 | `list_contents` / `get_content` | 查找稿件及各平台历史回执 |
 | `save_content` | 保存或更新本地稿件，不发布 |
 | `import_asset` | 从用户授权的绝对路径导入文章、视频或图片 |
-| `preview_article` | 按模板和目标平台预览安全 HTML，不发布 |
+| `preview_article` | 按公众号账号模板或指定模板／平台预览安全 HTML，不发布 |
 | `preflight` | 检查账号、内容、素材及平台要求 |
 | `publish` | 创建发布批次；会上传到真实平台 |
 | `list_batches` / `get_batch` | 查询任务和平台回执，支持历史批次 |
@@ -40,13 +40,15 @@ macOS ARM、Intel 和 Windows 安装包都提供该入口，普通用户不需�
   "content": {
     "kind": "article",
     "title": "一篇文章的标题",
-    "body": "## 开始\n\n这里是 Markdown 正文。",
-    "articleTemplateId": "editorial"
+    "inputFormat": "markdown",
+    "body": "## 开始\n\n这里是 Markdown 正文。"
   }
 }
 ```
 
-模板 ID 为 `clean`（清爽蓝）、`editorial`（墨色杂志）、`journal`（暖色手记）、`tech`（理性科技）、`forest`（森林来信）、`artdeco`（黑金画报）。返回的 `content.id` 用于后续操作。正文中的图片先使用 `import_asset` 导入，再通过 `![说明](easy-asset://素材ID)` 引用；封面使用返回的图片 `asset.id` 填入 `coverAssetId`。
+省略 `inputFormat` 时按 Markdown 保存，agent 已经写好的文章不必再次调用 OpenCode。模板 ID 为 `clean`（清爽蓝）、`editorial`（墨色杂志）、`journal`（暖色手记）、`tech`（理性科技）、`forest`（森林来信）、`artdeco`（黑金画报）。公众号实际发布使用该账号在账号管理中设置的模板；稿件的 `articleTemplateId` 保留非公众号与旧数据兼容。返回的 `content.id` 用于后续操作。正文中的图片先使用 `import_asset` 导入，再通过 `![说明](easy-asset://素材ID)` 引用；封面使用返回的图片 `asset.id` 填入 `coverAssetId`。
+
+公众号预览在 `preview_article` 中传入 `body` 和 `accountId`，即按该账号当前模板生成。`accountId` 仅允许公众号账号；如果同时传 `platformId`，必须是 `wechat`。省略账号时仍可按 `articleTemplateId` 和 `platformId` 预览。创建发布批次时冻结每个公众号的模板，后续调整账号模板不会改变队列内任务。
 
 调用 `preview_article` 可查看目标平台的 HTML 和样式说明；随后用 `preflight` 检查 `contentId` 及所选 `accountIds`。只有用户请求发布时才调用 `publish`：
 

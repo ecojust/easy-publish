@@ -50,6 +50,14 @@ fn bundled_engine_path(executable: &Path, windows: bool) -> Result<PathBuf, Publ
     }))
 }
 
+fn bundled_opencode_path(executable: &Path, windows: bool) -> Result<PathBuf, PublicError> {
+    Ok(bundled_engine_path(executable, windows)?.with_file_name(if windows {
+        "easy-publish-opencode.exe"
+    } else {
+        "easy-publish-opencode"
+    }))
+}
+
 fn base_command() -> Result<Command, PublicError> {
     if cfg!(debug_assertions) {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
@@ -131,9 +139,16 @@ fn command(data_dir: &Path) -> Result<Command, PublicError> {
         .stderr(Stdio::piped());
     // Never allow development keys to replace the application's persistent vault key in a release.
     if !cfg!(debug_assertions) {
+        let executable = std::env::current_exe()
+            .map_err(|_| PublicError::new("engine_missing", "无法定位内置发布引擎。"))?;
         command
             .env_remove("EASY_PUBLISH_TEST_KEY")
-            .env_remove("EASY_PUBLISH_TESTING");
+            .env_remove("EASY_PUBLISH_TESTING")
+            // A release uses its own sibling, never an inherited developer override or PATH.
+            .env(
+                "EASY_PUBLISH_OPENCODE_PATH",
+                bundled_opencode_path(&executable, cfg!(windows))?,
+            );
     }
     #[cfg(windows)]
     {
@@ -384,7 +399,16 @@ mod tests {
             bundled_engine_path(&windows_dir.join("easy-publish.exe"), true).unwrap(),
             windows_dir.join("easy-publish-engine.exe")
         );
+        assert_eq!(
+            bundled_opencode_path(&mac_dir.join("easy-publish"), false).unwrap(),
+            mac_dir.join("easy-publish-opencode")
+        );
+        assert_eq!(
+            bundled_opencode_path(&windows_dir.join("easy-publish.exe"), true).unwrap(),
+            windows_dir.join("easy-publish-opencode.exe")
+        );
         assert!(bundled_engine_path(Path::new("relative/easy-publish"), false).is_err());
+        assert!(bundled_opencode_path(Path::new("relative/easy-publish"), false).is_err());
     }
 
     #[test]

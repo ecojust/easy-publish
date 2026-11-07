@@ -1,0 +1,2 @@
+# Keep the pinned upstream license byte-for-byte identical on Windows.
+vendor/opencode/LICENSE text eol=lf

@@ -7,11 +7,16 @@ import re
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from easy_publish.article_formatting import ArticleFormattingMixin, format_ready, saved_article_input
 from easy_publish.catalog import BY_ID, PLATFORMS, bilibili_categories
+from easy_publish.article_templates import TEMPLATE_IDS, article_format_notes
 from easy_publish.content import ContentInput, image_sources, render_article
 from easy_publish.target_projection import project_content
 from easy_publish.store import Store, dump, now, uid
 from easy_publish.vault import VaultError
+
+
+_UNSET = object()
 
 
 class Problem(Exception):
@@ -25,8 +30,8 @@ def require(row, message="记录不存在"):
     return row
 
 
-class Service:
-    def __init__(self, data_dir: Path, runtime):
+class Service(ArticleFormattingMixin):
+    def __init__(self, data_dir: Path, runtime, formatter=None):
         self.data_dir, self.runtime = data_dir, runtime
         self.store = Store(data_dir)
         self.wake = asyncio.Event()
@@ -34,6 +39,7 @@ class Service:
         self.account_cancellations = {}
         self.queue_task = None
         self.closing = False
+        self._init_formatting(formatter)
 
     async def start(self):
         self.store.recover()
@@ -61,6 +67,7 @@ class Service:
 
     async def close(self):
         self.closing = True
+        await self.close_formatting()
         await self.runtime.shutdown()
         for task in [self.queue_task, *self.jobs.values()]:
             if task and not task.cancelling():
@@ -74,6 +81,7 @@ class Service:
         from .article_templates import ARTICLE_TEMPLATES
         return {"platforms": PLATFORMS,
                 "articleTemplates": ARTICLE_TEMPLATES,
+                "formatting": self.formatting_state(),
                 "contents": [self.store.content(r) for r in self.store.all("SELECT * FROM contents ORDER BY updated DESC")],
                 "accounts": [self.store.account(r) for r in self.store.all("SELECT * FROM accounts ORDER BY rowid")],
                 "batches": [self.store.batch(r) for r in self.store.all("SELECT * FROM batches ORDER BY created DESC LIMIT 200")],
@@ -89,7 +97,8 @@ class Service:
         return require(self.store.one("SELECT * FROM accounts WHERE id=?", (identifier,)), "账号不存在")
 
     def save_content(self, content: ContentInput, identifier=None):
-        value = content.model_dump()
+        previous = json.loads(self.content_row(identifier)["data"]) if identifier else None
+        value = saved_article_input(content.model_dump(), previous)
         if any(len(t) > 80 for t in value["tags"]):
             raise Problem("单个话题不能超过 80 字")
         if len(value["platformOptions"]) > len(PLATFORMS) or any(
@@ -135,14 +144,36 @@ class Service:
                            (identifier, platform_id, label.strip(), "login_required", "请连接账号", now(), int(platform["auth"] == "wechat_api")))
         return self.store.account(self.account_row(identifier))
 
-    def set_account_preferences(self, identifier, default_selected):
+    def set_account_preferences(self, identifier, default_selected=_UNSET, wechat_template_id=_UNSET):
         account = self.account_row(identifier)
-        if type(default_selected) is not bool:
+        if default_selected is _UNSET and wechat_template_id is _UNSET:
+            raise Problem("请提供需要修改的账号设置")
+        if default_selected is not _UNSET and type(default_selected) is not bool:
             raise Problem("默认选择设置必须为开或关")
-        self.store.execute("INSERT INTO account_preferences(account_id,default_selected) VALUES (?,?) "
-                           "ON CONFLICT(account_id) DO UPDATE SET default_selected=excluded.default_selected",
-                           (identifier, int(default_selected)))
+        if wechat_template_id is not _UNSET:
+            if account["platform"] != "wechat":
+                raise Problem("只有微信公众号账号可以设置公众号模板", "template_account_mismatch")
+            if not isinstance(wechat_template_id, str) or wechat_template_id not in TEMPLATE_IDS:
+                raise Problem("公众号模板不存在，请重新选择")
+        with self.store.transaction() as db:
+            selected = self.store.account_default_selected(identifier) if default_selected is _UNSET else default_selected
+            template = self.store.account_wechat_template(identifier) if wechat_template_id is _UNSET else wechat_template_id
+            db.execute("INSERT INTO account_preferences(account_id,default_selected,wechat_template_id) VALUES (?,?,?) "
+                       "ON CONFLICT(account_id) DO UPDATE SET default_selected=excluded.default_selected,wechat_template_id=excluded.wechat_template_id",
+                       (identifier, int(selected), template))
         return self.store.account(account)
+
+    def preview_article(self, body, template="clean", platform=None, account_id=None):
+        if account_id is not None:
+            account = self.account_row(account_id)
+            if account["platform"] != "wechat" or platform not in {None, "wechat"}:
+                raise Problem("公众号模板预览需要选择微信公众号账号", "template_account_mismatch")
+            template, platform = self.store.account_wechat_template(account_id), "wechat"
+        if platform is not None and (platform not in BY_ID or "article" not in BY_ID[platform]["kinds"]):
+            raise Problem("请选择支持文章的平台")
+        if template not in TEMPLATE_IDS:
+            raise Problem("文章模板不存在，请重新选择")
+        return {"html": render_article(body, template, platform), "notes": article_format_notes(platform)}
 
     def delete_account(self, identifier):
         self.account_row(identifier)
@@ -238,6 +269,8 @@ class Service:
             common.append("请填写标题")
         if not self.runtime.vault.ready:
             common.append("应用内账号存储不可用，请在设置中检查")
+        if content["kind"] == "article" and content.get("inputFormat") == "plain" and not content.get("formatReady", format_ready(content)):
+            common.append("请先整理当前原文并检查预览")
         if content["kind"] == "article" and not content["body"].strip():
             common.append("请填写文章正文")
         if content["kind"] == "video" and not content["videoAssetId"]:
@@ -361,7 +394,14 @@ class Service:
             raise Problem("发布检查未通过：" + "；".join(dict.fromkeys(e for t in check["targets"] for e in t["errors"])), "preflight_failed")
         identifier = uid()
         with self.store.transaction() as db:
-            db.execute("INSERT INTO batches VALUES (?,?,?,?,?,?,?,?,?)", (identifier, request_id, content_id, content["title"], content["kind"], mode, now(), dump(content), selection))
+            accounts = [self.account_row(account_id) for account_id in account_ids]
+            snapshot = dict(content)
+            if content["kind"] == "article":
+                snapshot["accountTemplateIds"] = {
+                    account["id"]: self.store.account_wechat_template(account["id"])
+                    for account in accounts if account["platform"] == "wechat"
+                }
+            db.execute("INSERT INTO batches VALUES (?,?,?,?,?,?,?,?,?)", (identifier, request_id, content_id, content["title"], content["kind"], mode, now(), dump(snapshot), selection))
             for account_id in account_ids:
                 account = self.account_row(account_id)
                 db.execute("INSERT INTO tasks(id,batch_id,account_id,account_label,platform,status,message) VALUES (?,?,?,?,?,'queued','等待发布')",
@@ -371,13 +411,21 @@ class Service:
 
     def payload(self, content, task, mode):
         content = project_content(content, task["platform"])
+        template = content.get("articleTemplateId", "clean")
+        # New batches freeze each WeChat account's setting. An absent map marks
+        # an older batch and must keep its original draft template, even on retry.
+        if task["platform"] == "wechat" and "accountTemplateIds" in content:
+            templates = content["accountTemplateIds"]
+            template = templates.get(task["account_id"]) if isinstance(templates, dict) else None
+            if not isinstance(template, str) or template not in TEMPLATE_IDS:
+                raise Problem("公众号模板快照无效，请重新创建发布任务")
         def asset_path(identifier):
             return self.asset_row(identifier)["path"] if identifier else None
         images = set(content["imageAssetIds"])
         if content["kind"] == "article":
             images |= {s.removeprefix("easy-asset://") for s in image_sources(render_article(content["body"])) if s.startswith("easy-asset://")}
         return {"platform_id": task["platform"], "account_id": task["account_id"], "kind": content["kind"], "mode": mode,
-                "title": content["title"].strip(), "body_html": render_article(content["body"], content.get("articleTemplateId", "clean"), task["platform"]) if content["kind"] == "article" else "",
+                "title": content["title"].strip(), "body_html": render_article(content["body"], template, task["platform"]) if content["kind"] == "article" else "",
                 "description": content["description"], "tags": content["tags"], "author": content["author"],
                 "video_path": asset_path(content["videoAssetId"]), "cover_path": asset_path(content["coverAssetId"]),
                 "images": {i: asset_path(i) for i in images}, "options": content.get("platformOptions", {}).get(task["platform"], {})}

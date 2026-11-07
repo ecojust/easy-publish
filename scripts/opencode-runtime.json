@@ -1,0 +1,32 @@
+{
+  "version": "1.19.5",
+  "repository": "anomalyco/opencode",
+  "sourceCommit": "810c0eba1a7348036f8bdf61e6632d0c36c6876c",
+  "licenseSha256": "625f0f619133f89bbbb2abe37369613dfa1885eba1e50d02170deb62bb42cb6b",
+  "targets": {
+    "aarch64-apple-darwin": {
+      "archive": "opencode-darwin-arm64.zip",
+      "bytes": 64278924,
+      "sha256": "c1c9e62521192192ef4c3ed1355ada2144055bddb61682217e997b03c55203c1",
+      "executable": "opencode"
+    },
+    "x86_64-apple-darwin": {
+      "archive": "opencode-darwin-x64-baseline.zip",
+      "bytes": 69100890,
+      "sha256": "e1235374cb7e712cdc15e21ba915a029a5d22312b460606d0783754739706775",
+      "executable": "opencode"
+    },
+    "x86_64-pc-windows-msvc": {
+      "archive": "opencode-windows-x64-baseline.zip",
+      "bytes": 81738223,
+      "sha256": "e4dac5cd38a182a24e7b3e18853f01d08cdb137e50b3bd1397c1a89e54d28c63",
+      "executable": "opencode.exe"
+    },
+    "x86_64-unknown-linux-gnu": {
+      "archive": "opencode-linux-x64-baseline.tar.gz",
+      "bytes": 79651821,
+      "sha256": "17c200fd4b2289954cc01552559f9b6d03ec157b2ddfb5eb54144f491656333d",
+      "executable": "opencode"
+    }
+  }
+}

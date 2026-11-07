@@ -7,9 +7,9 @@ const fixturePath = path.resolve("tests/ui/bridge-fixture.js");
 test.beforeEach(async ({ page }) => {
   await page.exposeFunction("__renderMarkdownFixture", (body: string) => new MarkdownIt("commonmark", { html: false, breaks: true }).render(body));
   await page.addInitScript({ path: fixturePath });
-  // These existing editing/publishing cases exercise explicit target choices.
+  // Keep two article accounts enabled; video cases exercise explicit target choices.
   // Fresh-account defaults are covered separately in account-defaults.spec.ts.
-  await page.addInitScript(() => { for (const account of (window as any).__fixture.state.accounts) account.defaultSelected = false; });
+  await page.addInitScript(() => { for (const account of (window as any).__fixture.state.accounts) account.defaultSelected = ["wechat", "dayu"].includes(account.platformId); });
 });
 
 test("article editing preserves unsaved state, imports local images and sanitizes preview", async ({ page }) => {
@@ -25,7 +25,6 @@ test("article editing preserves unsaved state, imports local images and sanitize
   await page.evaluate(() => (window as any).__fixture.pick("/fixture/article-image.png"));
   await page.getByRole("button", { name: "插入正文图片" }).click();
   await expect(page.getByRole("textbox", { name: "文章正文" })).toHaveValue(/easy-asset:\/\//);
-  await page.getByRole("button", { name: "预览", exact: true }).click();
   await expect(page.locator(".markdown-preview img")).toHaveAttribute("src", /^data:image\/png;base64,/);
   expect(await page.locator(".markdown-preview script").count()).toBe(0);
   expect(await page.locator('.markdown-preview a[href^="javascript:"]').count()).toBe(0);
@@ -50,7 +49,6 @@ test("MCP-style article images are discovered from body references without image
     return asset.id;
   });
   await page.locator(".draft-item:visible").filter({ hasText: "MCP 正文图片" }).click();
-  await page.getByRole("button", { name: "预览", exact: true }).click();
   await expect(page.locator('.markdown-preview img[alt="正文图片"]')).toHaveAttribute("src", /^data:image\/png;base64,/);
   await expect(page.locator('.markdown-preview img[alt="再次引用"]')).toHaveAttribute("src", /^data:image\/png;base64,/);
   await expect(page.locator(".markdown-preview img")).toHaveCount(2);
@@ -65,20 +63,18 @@ test("MCP-style article images are discovered from body references without image
 
 test("preflight blocks errors, dynamic fields persist, enqueue retries reuse requestId", async ({ page }) => {
   await page.goto("/");
-  await page.locator(".publish-panel:visible .target-card").filter({ hasText: "品牌公众号" }).click();
-  await page.locator(".publish-panel:visible .target-card").filter({ hasText: "创作工作室" }).click();
   await page.getByLabel("信息来源").selectOption("AI生成");
   await page.evaluate(() => (window as any).__fixture.blockPreflight(true));
   await page.getByRole("button", { name: "检查发布内容" }).click();
   await expect(page.getByText("测试：平台要求添加封面。", { exact: false }).first()).toBeVisible();
-  await expect(page.getByRole("button", { name: "发布到所选账号" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "发布到已开启账号" })).toBeDisabled();
   await page.evaluate(() => (window as any).__fixture.blockPreflight(false));
   await page.getByRole("button", { name: "检查发布内容" }).click();
   await expect(page.getByText("发布前检查通过")).toBeVisible();
   await page.evaluate(() => (window as any).__fixture.failBatchOnce());
-  await page.getByRole("button", { name: "发布到所选账号" }).click();
+  await page.getByRole("button", { name: "发布到已开启账号" }).click();
   await expect(page.getByRole("alert")).toContainText("网络暂时中断");
-  await page.getByRole("button", { name: "发布到所选账号" }).click();
+  await page.getByRole("button", { name: "发布到已开启账号" }).click();
   await expect(page.getByRole("heading", { name: "发布任务", exact: false })).toBeVisible();
   const result = await page.evaluate(() => ({ batches: (window as any).__fixture.state.batches, calls: (window as any).__fixture.calls.filter((call: any) => call.path === "/api/batches"), content: (window as any).__fixture.state.contents[0] }));
   expect(result.batches).toHaveLength(1);
@@ -100,28 +96,27 @@ test("previous platform receipts default off and an explicit repeat creates a fr
     ] });
   });
   await page.goto("/");
-  const target = (label: string) => page.locator(".publish-panel:visible .target-card").filter({ hasText: label });
-  await expect(target("品牌公众号").getByRole("checkbox")).not.toBeChecked();
-  await expect(target("品牌公众号")).toContainText("此前已发布");
-  await expect(target("创作笔记").getByRole("checkbox")).not.toBeChecked();
-  await expect(target("创作笔记")).toContainText("此前已提交");
-  await expect(target("另一个知乎账号").getByRole("checkbox")).not.toBeChecked();
-  await expect(target("结果待核对的雪球").getByRole("checkbox")).not.toBeChecked();
-  await expect(target("结果待核对的雪球")).toContainText("结果待确认");
-  await expect(target("创作工作室").getByRole("checkbox")).toBeChecked();
-  await target("品牌公众号").click();
+  const preview = (label: string) => page.getByRole("tab", { name: new RegExp(label) });
+  const history = (label: string) => page.locator(".article-history>div").filter({ hasText: label });
+  await expect(preview("品牌公众号")).toHaveCount(0);
+  await expect(history("品牌公众号")).toContainText("此前已发布");
+  await expect(history("创作笔记")).toContainText("此前已提交");
+  await expect(preview("另一个知乎账号")).toHaveCount(0);
+  await expect(history("结果待核对的雪球")).toContainText("结果待确认");
+  await expect(preview("创作工作室")).toBeVisible();
+  await history("品牌公众号").getByRole("button").click();
   await page.getByLabel("信息来源").selectOption("无需标注");
   await page.getByRole("button", { name: "检查发布内容", exact: true }).click();
-  await page.getByRole("button", { name: "发布到所选账号", exact: true }).click();
+  await page.getByRole("button", { name: "发布到已开启账号", exact: true }).click();
   await expect(page.getByRole("heading", { name: "发布任务", exact: false })).toBeVisible();
   await page.evaluate(() => { for (const task of (window as any).__fixture.state.batches[1].tasks) task.status = "submitted"; });
   await page.getByRole("navigation").getByRole("button", { name: "文章", exact: true }).click();
-  await expect(target("创作工作室")).toContainText("此前已提交");
-  await expect(target("创作工作室").getByRole("checkbox")).not.toBeChecked();
-  await expect(target("品牌公众号").getByRole("checkbox")).not.toBeChecked();
-  await target("品牌公众号").click();
+  await expect(history("创作工作室")).toContainText("此前已提交");
+  await expect(preview("创作工作室")).toHaveCount(0);
+  await expect(preview("品牌公众号")).toHaveCount(0);
+  await history("品牌公众号").getByRole("button").click();
   await page.getByRole("button", { name: "检查发布内容", exact: true }).click();
-  await page.getByRole("button", { name: "发布到所选账号", exact: true }).click();
+  await page.getByRole("button", { name: "发布到已开启账号", exact: true }).click();
   const batches = await page.evaluate(() => (window as any).__fixture.state.batches);
   expect(batches).toHaveLength(3);
   expect(batches[1].contentId).toBe("c-article");
@@ -157,48 +152,46 @@ test("republishing video selects compatible remaining platforms and ignores plat
   await expect(target("品牌抖音").getByRole("checkbox")).not.toBeChecked();
 });
 
-test("article templates use engine previews and persist through saving and publishing", async ({ page }) => {
+test("account templates persist and preview without changing the original article or calling AI", async ({ page }) => {
+  await page.addInitScript(() => { (window as any).__fixture.state.accounts.find((item: any) => item.id === "a-zhihu").defaultSelected = true; });
   await page.goto("/");
   await page.getByRole("textbox", { name: "文章标题" }).fill("文章模板工作流");
-  await page.getByRole("textbox", { name: "文章正文" }).fill("## 让内容更易读\n\n一份正文，按平台转换格式。\n\n> 清楚的结构，让阅读更轻松。\n\n- 选择模板\n- 检查预览\n- 分发内容");
-  const templatePicker = page.getByRole("group", { name: "文章模板", exact: true });
-  await expect(templatePicker.locator(".template-miniature")).toHaveCount(6);
-  expect(await page.evaluate(() => (window as any).__fixture.calls.filter((call: any) => call.method !== "GET" && call.path !== "/api/preview/article"))).toEqual([]);
-  for (const [id, name] of [["clean", "清爽蓝"], ["editorial", "墨色杂志"], ["journal", "暖色手记"], ["tech", "理性科技"], ["forest", "森林来信"], ["artdeco", "黑金画报"]]) {
-    await templatePicker.getByRole("button", { name: new RegExp(name) }).click();
-    await expect(page.locator(`.markdown-preview [data-template="${id}"]`)).toBeVisible();
-    await expect(templatePicker.getByRole("button", { name: new RegExp(name) })).toHaveAttribute("aria-pressed", "true");
+  await page.getByRole("textbox", { name: "文章正文" }).fill("## 让内容更易读\n\n一份正文，按平台转换格式。");
+  await page.getByRole("navigation").getByRole("button", { name: "账号管理", exact: true }).click();
+  await page.getByRole("button", { name: "设置 品牌公众号 文章模板" }).click();
+  const picker = page.getByRole("group", { name: "公众号文章模板", exact: true });
+  await expect(picker.locator(".template-miniature")).toHaveCount(6);
+  for (const name of ["清爽蓝", "墨色杂志", "暖色手记", "理性科技", "森林来信", "黑金画报"]) {
+    const choice = picker.getByRole("button", { name: new RegExp(name) });
+    await choice.click(); await expect(choice).toHaveAttribute("aria-pressed", "true");
   }
-  await page.getByRole("combobox", { name: "文章预览平台" }).selectOption("zhihu");
+  await page.screenshot({ path: "test-results/account-template-modal.png", fullPage: true });
+  await page.getByRole("button", { name: "保存模板", exact: true }).click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await page.getByRole("navigation").getByRole("button", { name: "文章", exact: true }).click();
+  await expect(page.getByRole("textbox", { name: "文章标题" })).toHaveValue("文章模板工作流");
+  await expect(page.locator('.markdown-preview [data-template="artdeco"]')).toBeVisible();
+  await page.getByRole("tab", { name: /创作笔记/ }).click();
   await expect(page.locator(".preview-notes")).toContainText("原生字体和颜色");
   await expect(page.locator(".markdown-preview [data-template]")).toHaveCount(0);
-  await page.getByRole("combobox", { name: "文章预览平台" }).selectOption("wechat");
-  await expect(page.locator('.markdown-preview [data-template="artdeco"]')).toBeVisible();
+  await page.getByRole("tab", { name: /品牌公众号/ }).click();
   await page.getByRole("button", { name: "保存", exact: true }).click();
   await expect(page.getByRole("status").filter({ hasText: "稿件已保存" })).toBeVisible();
   await page.getByRole("button", { name: "新建文章", exact: true }).click();
-  await expect(templatePicker.getByRole("button", { name: /清爽蓝/ })).toHaveAttribute("aria-pressed", "true");
   await page.locator(".draft-item:visible").filter({ hasText: "文章模板工作流" }).click();
-  await expect(templatePicker.getByRole("button", { name: /黑金画报/ })).toHaveAttribute("aria-pressed", "true");
   await expect(page.locator('.markdown-preview [data-template="artdeco"]')).toBeVisible();
-  await page.evaluate(() => window.scrollTo(0, 0));
   await page.screenshot({ path: "test-results/article-templates-1440.png", fullPage: true });
   await page.setViewportSize({ width: 1000, height: 950 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false);
   await page.screenshot({ path: "test-results/article-templates-1000.png", fullPage: true });
-  await page.locator(".publish-panel:visible .target-card").filter({ hasText: "品牌公众号" }).click();
+  await page.getByLabel("信息来源").selectOption("无需标注");
   await page.getByRole("button", { name: "检查发布内容", exact: true }).click();
-  await page.getByRole("button", { name: "发布到所选账号", exact: true }).click();
-  const result = await page.evaluate(() => ({ contents: (window as any).__fixture.state.contents, batch: (window as any).__fixture.state.batches[0], previews: (window as any).__fixture.calls.filter((call: any) => call.path === "/api/preview/article") }));
-  const saved = result.contents.find((item: any) => item.id === result.batch.contentId);
-  expect(saved.articleTemplateId).toBe("artdeco");
-  expect(saved.body).toContain("让内容更易读");
-  expect(saved.body).not.toContain("灵感的形状");
-  const samples = result.previews.filter((call: any) => call.body.body.startsWith("# 灵感的形状"));
-  expect(samples).toHaveLength(6);
-  expect(new Set(samples.map((call: any) => call.body.articleTemplateId)).size).toBe(6);
-  expect(result.previews.some((call: any) => call.body.articleTemplateId === "artdeco" && call.body.platformId === "zhihu")).toBe(true);
-  expect(result.previews.some((call: any) => call.body.articleTemplateId === "artdeco" && call.body.platformId === "wechat")).toBe(true);
+  await page.getByRole("button", { name: "发布到已开启账号", exact: true }).click();
+  const result = await page.evaluate(() => ({ state: (window as any).__fixture.state, calls: (window as any).__fixture.calls }));
+  expect(result.state.accounts.find((item: any) => item.id === "a-wechat").wechatTemplateId).toBe("artdeco");
+  expect(result.state.contents.find((item: any) => item.title === "文章模板工作流").body).toContain("让内容更易读");
+  expect(result.calls.filter((call: any) => /\/format$/.test(call.path))).toHaveLength(0);
+  expect(result.calls.filter((call: any) => call.path === "/api/preview/article" && call.body.body.startsWith("# 灵感的形状"))).toHaveLength(6);
 });
 
 test("engine preview failures can retry and preview markup remains constrained", async ({ page }) => {
@@ -212,7 +205,6 @@ test("engine preview failures can retry and preview markup remains constrained",
     };
   });
   await page.goto("/");
-  await page.getByRole("button", { name: "预览", exact: true }).click();
   await expect(page.getByRole("alert")).toContainText("渲染暂时失败");
   await page.evaluate(() => { (window as any).__previewFailure = false; });
   await page.getByRole("button", { name: "重新生成预览", exact: true }).click();
@@ -252,7 +244,6 @@ test("video import and platform draft submission target only video accounts", as
   expect(content.tags).toEqual(["创作"]);
   await page.getByRole("navigation").getByRole("button", { name: "文章", exact: true }).click();
   await page.getByRole("button", { name: "平台草稿", exact: true }).click();
-  await page.locator('.publish-panel:visible .target-card').filter({ hasText: "品牌公众号" }).click();
   await page.getByRole("button", { name: "检查草稿内容" }).click();
   await page.getByRole("button", { name: "保存平台草稿" }).click();
   const batches = await page.evaluate(() => (window as any).__fixture.state.batches);
@@ -569,8 +560,6 @@ test("task receipts stay distinct and only known failures can retry", async ({ p
 
 test("article import, responsive workspace and truthful disconnected view", async ({ page, browser }) => {
   await page.goto("/");
-  await page.locator(".publish-panel:visible .target-card").filter({ hasText: "品牌公众号" }).click();
-  await page.locator(".publish-panel:visible .target-card").filter({ hasText: "创作笔记" }).click();
   await page.screenshot({ path: "test-results/articles-1440.png", fullPage: true });
   await page.setViewportSize({ width: 1000, height: 950 });
   await page.screenshot({ path: "test-results/articles-1000.png", fullPage: true });
@@ -597,11 +586,11 @@ test("first launch with no accounts or drafts can create the first real local dr
   });
   await page.goto("/");
   await expect(page.getByRole("textbox", { name: "文章标题" })).toHaveValue("");
-  await expect(page.locator(".publish-panel:visible").getByText("添加你的第一个账号")).toBeVisible();
-  await expect(page.getByRole("button", { name: "发布到所选账号" })).toBeDisabled();
+  await expect(page.getByText("暂无本次发布账号")).toBeVisible();
+  await expect(page.getByRole("button", { name: "发布到已开启账号" })).toBeDisabled();
   await page.screenshot({ path: "test-results/first-launch-empty.png", fullPage: true });
   await page.getByRole("button", { name: "保存", exact: true }).click();
-  await expect(page.getByRole("alert")).toContainText("请先填写内容标题");
+  await expect(page.getByRole("alert")).toContainText("请先填写文章标题");
   await page.getByRole("textbox", { name: "文章标题" }).fill("我的第一篇文章");
   await page.getByRole("textbox", { name: "文章正文" }).fill("从今天开始分享。");
   await page.getByRole("button", { name: "保存", exact: true }).click();

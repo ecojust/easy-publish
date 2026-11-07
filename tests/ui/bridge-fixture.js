@@ -28,14 +28,15 @@
     {"id": "forest", "name": "森林来信", "description": "浅绿纸面、圆角边框与柔和强调，适合自然和人文", "accent": "#2f6b4f"},
     {"id": "artdeco", "name": "黑金画报", "description": "黑金标题带、几何边框与高对比引用，适合专题策划", "accent": "#b7791f"},
   ];
-  const account = (id, platformId, label, status = "ready") => ({ id, platformId, label, status, defaultSelected: true, message: status === "ready" ? "已连接（浏览器测试替身）" : "请连接测试账号", updatedAt: date, credentialConfigured: platformId === "wechat", ...(platformId === "bilibili" ? { bilibiliCategories: status === "ready" ? clone(bilibiliCategories) : [] } : {}) });
-  const draft = (id, kind, title, body) => ({ id, kind, title, body, description: "", tags: [], author: "", videoAssetId: null, coverAssetId: null, imageAssetIds: [], platformOptions: {}, articleTemplateId: "clean", platformPublicationStates: {}, createdAt: date, updatedAt: date, revision: 1 });
+  const account = (id, platformId, label, status = "ready") => ({ id, platformId, label, status, defaultSelected: true, ...(platformId === "wechat" ? { wechatTemplateId: "clean" } : {}), message: status === "ready" ? "已连接（浏览器测试替身）" : "请连接测试账号", updatedAt: date, credentialConfigured: platformId === "wechat", ...(platformId === "bilibili" ? { bilibiliCategories: status === "ready" ? clone(bilibiliCategories) : [] } : {}) });
+  const draft = (id, kind, title, body) => ({ id, kind, title, body, inputFormat: "markdown", sourceText: "", formatReady: !!body, formatModel: null, description: "", tags: [], author: "", videoAssetId: null, coverAssetId: null, imageAssetIds: [], platformOptions: {}, articleTemplateId: "clean", platformPublicationStates: {}, createdAt: date, updatedAt: date, revision: 1 });
   const state = {
     platforms, articleTemplates,
+    formatting: { available: true, version: "test-1.0", modelId: "opencode/test-free", modelName: "测试免费模型", free: true, message: "免费整理服务已就绪" },
     accounts: [account("a-wechat", "wechat", "品牌公众号"), account("a-zhihu", "zhihu", "创作笔记"), account("a-dayu", "dayu", "创作工作室"), account("a-douyin", "douyin", "品牌抖音"), account("a-kuaishou", "kuaishou", "品牌快手"), account("a-xhs", "xiaohongshu", "品牌小红书"), account("a-channels", "channels", "品牌视频号", "login_required"), account("a-bilibili", "bilibili", "品牌哔哩哔哩")],
     contents: [draft("c-article", "article", "把创作的时间，还给创作", "## 少一点重复，多一点表达\n\n每一篇好内容，都值得被更多人看见。\n\n当文章写完、视频剪好，接下来的分享应该简单一些。\n\n### 这一次，专注内容本身\n\n- 在一个工作空间整理素材\n- 为不同平台选择合适的账号\n- 清楚了解每个目标的发布进度\n\n**一份创作，更多可能。**"), draft("c-article-2", "article", "从灵感到第一篇文章", "写下你的第一个想法。")],
     batches: [],
-    runtime: { browserReady: true, browserInstalling: false, browserMessage: "测试浏览器已就绪", vaultReady: true, vaultMessage: "测试凭据库已就绪", version: "0.1.5" },
+    runtime: { browserReady: true, browserInstalling: false, browserMessage: "测试浏览器已就绪", vaultReady: true, vaultMessage: "测试凭据库已就绪", version: "0.1.6" },
   };
   const assets = {};
   const calls = [];
@@ -43,12 +44,27 @@
   let preflightError = false;
   let nextFile = null;
   const deferredLogins = new Set();
+  const formatJobs = {};
+  let deferFormats = false;
+  let failFormat = false;
+  const finishFormat = (id) => {
+    const job = formatJobs[id];
+    if (job.status !== "running") return;
+    const content = state.contents.find((item) => item.id === job.contentId);
+    if (failFormat || content.revision !== job.revision) { job.status = "failed"; job.message = "免费整理暂不可用，原文已保留"; return; }
+    content.body = "## 整理后的文章\n\n" + content.sourceText.replace(/【图片(\d+)】/g, (_, number) => `![正文图片](easy-asset://${content.imageAssetIds[Number(number) - 1]})`);
+    content.formatReady = true; content.formatModel = "opencode/test-free"; content.revision += 1;
+    job.status = "succeeded"; job.message = "整理完成"; job.content = clone(content);
+  };
   const finishLogin = (entry) => {
     entry.status = "ready"; entry.message = "测试会话已连接";
     if (entry.platformId === "bilibili") entry.bilibiliCategories = clone(bilibiliCategories);
   };
   window.__fixture = {
-    state, calls,
+    state, calls, formatJobs,
+    deferFormatting: (value) => { deferFormats = value; },
+    failFormatting: (value) => { failFormat = value; },
+    finishFormatting: finishFormat,
     failBatchOnce: () => { failNextBatch = true; },
     blockPreflight: (value) => { preflightError = value; },
     pick: (value) => { nextFile = value; },
@@ -82,9 +98,24 @@
         }
         return clone(state);
       }
+      if (method === "POST" && path === "/api/formatting/check") { if (state.formatting.available) { state.formatting.free = true; state.formatting.message = "免费整理服务已就绪"; } return clone(state.formatting); }
+      if (method === "POST" && /^\/api\/contents\/[^/]+\/format$/.test(path)) {
+        if (formatJobs[body.requestId]) return clone(formatJobs[body.requestId]);
+        const contentId = path.split("/")[3];
+        const job = { id: body.requestId, contentId, revision: body.revision, status: "running", message: "正在整理原文" };
+        formatJobs[job.id] = job; return clone(job);
+      }
+      if (path.startsWith("/api/format-jobs/")) {
+        const id = path.split("/")[3]; const job = formatJobs[id];
+        if (!job) throw { error: "整理任务不存在", code: "not_found" };
+        if (method === "POST" && path.endsWith("/cancel")) { if (job.status === "running") { job.status = "cancelled"; job.message = "整理已取消，原文已保留"; } return clone(job); }
+        if (!deferFormats) finishFormat(id);
+        return clone(job);
+      }
       if (method === "POST" && path === "/api/preview/article") {
         // UI protocol fixture only. Production uses the Python article renderer.
-        const template = articleTemplates.find((item) => item.id === body.articleTemplateId);
+        const templateId = body.accountId ? state.accounts.find((account) => account.id === body.accountId).wechatTemplateId || "clean" : body.articleTemplateId;
+        const template = articleTemplates.find((item) => item.id === templateId);
         const html = await window.__renderMarkdownFixture(body.body);
         const native = ["zhihu", "xueqiu"].includes(body.platformId);
         return {
@@ -93,14 +124,16 @@
         };
       }
       if (method === "POST" && path === "/api/contents") {
-        const content = { ...clone(body), id: crypto.randomUUID(), createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), revision: 1 };
+        const content = { inputFormat: "markdown", sourceText: "", formatReady: body.inputFormat !== "plain" && !!body.body, formatModel: null, ...clone(body), ...(body.inputFormat === "plain" ? { body: "" } : {}), id: crypto.randomUUID(), createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), revision: 1 };
         state.contents.push(content);
         return clone(content);
       }
       if (method === "PUT" && path.startsWith("/api/contents/")) {
         const index = state.contents.findIndex((content) => content.id === path.split("/").pop());
         const old = state.contents[index];
-        state.contents[index] = { ...old, ...clone(body), updatedAt: new Date().toISOString(), revision: old.revision + 1 };
+        const changedSource = old.inputFormat !== body.inputFormat || old.sourceText !== body.sourceText || JSON.stringify(old.imageAssetIds) !== JSON.stringify(body.imageAssetIds);
+        const rendered = body.inputFormat === "plain" ? { body: changedSource ? "" : old.body, formatReady: !changedSource && old.formatReady, formatModel: changedSource ? null : old.formatModel } : { formatReady: !!body.body, formatModel: null };
+        state.contents[index] = { ...old, ...clone(body), ...rendered, updatedAt: new Date().toISOString(), revision: old.revision + 1 };
         return clone(state.contents[index]);
       }
       if (method === "DELETE" && path.startsWith("/api/contents/")) {
@@ -141,7 +174,8 @@
       }
       if (method === "PUT" && path.startsWith("/api/accounts/") && path.endsWith("/preferences")) {
         const account = state.accounts.find((entry) => entry.id === path.split("/")[3]);
-        account.defaultSelected = body.defaultSelected;
+        if ("defaultSelected" in body) account.defaultSelected = body.defaultSelected;
+        if ("wechatTemplateId" in body) account.wechatTemplateId = body.wechatTemplateId;
         return clone(account);
       }
       if (method === "POST" && path.startsWith("/api/accounts/") && path.endsWith("/cancel")) {
