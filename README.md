@@ -1,10 +1,26 @@
-# Easy Publish
+<div align="center">
+  <img src="src-tauri/icons/128x128@2x.png" width="112" alt="Easy Publish Logo">
+  <h1>Easy Publish</h1>
+</div>
 
-把一篇文章或一个视频发布到多个平台的本地桌面工作台。文章与视频分开管理，支持多个账号、内容预检、平台草稿和逐个目标的发布记录。
+Easy Publish 是把一篇文章或一个视频发布到多个平台的本地桌面工作台。文章与视频分开管理，账号统一配置；纯文本通过 OpenCode 润色，用 Wenyan 模板预览后发布。也可通过 MCP，让 Agent 使用已连接的账号发布内容并查询结果。
 
-面向 **macOS 13.5+（Apple Silicon / Intel）和 Windows 10+ x64**。桌面使用 Tauri 2 和系统 WebView，发布引擎随安装包提供，普通用户无需安装 Python、Node.js 或开发工具。macOS 最低版本由内置 Patchright 的 Node 24 驱动要求决定，来源见[桌面说明](docs/desktop.md)。
+[![GitHub release](https://img.shields.io/github/v/release/ecojust/easy-publish?style=flat-square&label=release&color=0f766e&sort=date)](https://github.com/ecojust/easy-publish/releases/latest)
+[![GitHub Release 总下载量](https://img.shields.io/github/downloads/ecojust/easy-publish/total?style=flat-square&label=downloads&color=16a34a)](https://github.com/ecojust/easy-publish/releases)
+[![Platforms](https://img.shields.io/badge/platforms-macOS%20%7C%20Windows-2563eb?style=flat-square)](docs/desktop.md)
+[![文章平台](https://img.shields.io/badge/articles-4%20platforms-7c3aed?style=flat-square)](#平台能力)
+[![视频平台](https://img.shields.io/badge/videos-5%20platforms-f97316?style=flat-square)](#平台能力)
+[![Wenyan 官方模板](https://img.shields.io/badge/Wenyan-8%20themes-0891b2?style=flat-square)](docs/article-templates.md)
+[![MCP tools](https://img.shields.io/badge/MCP-12%20tools-5c4ee5?style=flat-square)](docs/mcp.md)
+[![MIT license](https://img.shields.io/badge/license-MIT-f4c430?style=flat-square)](LICENSE)
 
-当前版本为 `0.1.8`，安装包见 [GitHub Release](https://github.com/ecojust/easy-publish/releases/tag/v0.1.8)。已实现的平台适配使用隔离的页面与 HTTP fixture 验证，**尚未完成真实账号登录及发布验收**；网站改版、账号权限和人工验证都可能影响实际操作。
+[下载 Easy Publish 0.1.8](https://github.com/ecojust/easy-publish/releases/tag/v0.1.8) · macOS 13.5+（Apple Silicon / Intel）/ Windows 10+ x64
+
+[使用指南](#使用流程) · [文章模板](docs/article-templates.md) · [MCP / Agent 接入](docs/mcp.md) · [反馈问题](https://github.com/ecojust/easy-publish/issues)
+
+![Easy Publish 当前版本的文章工作台，使用示例稿件与模拟账号数据](docs/previews/workspace-zh.png)
+
+安装包内置发布引擎、OpenCode 与 Wenyan，无需另装 Python、Node.js 或开发工具。平台流程使用隔离测试验证；网站改版、账号权限与人工验证可能影响实际操作，具体要求见下表。
 
 ## 平台能力
 
