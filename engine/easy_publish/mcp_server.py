@@ -19,6 +19,7 @@ import httpx
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from . import __version__
+from .article_templates import ArticleTemplateId
 from .content import ContentInput
 from .mcp_connection import ConnectionUnavailable, read_endpoint
 
@@ -63,7 +64,7 @@ class ImportAsset(Arguments):
 
 class PreviewArticle(Arguments):
     body: str = Field(max_length=500_000)
-    articleTemplateId: Literal["clean", "editorial", "journal", "tech"] = "clean"
+    articleTemplateId: ArticleTemplateId = "clean"
     platformId: Literal["wechat", "zhihu", "dayu", "xueqiu"] | None = None
 
 
@@ -88,14 +89,14 @@ class BatchId(Arguments):
 
 TOOL_DEFINITIONS = [
     ("list_platforms", "List article/video platform capabilities, required platform options, and article templates. No credentials are returned.", KindFilter, True),
-    ("list_accounts", "List accounts compatible with the requested content kind; connected accounts only by default. Article accounts cannot publish videos and video accounts cannot publish articles.", AccountFilter, True),
+    ("list_accounts", "List accounts compatible with the requested content kind; connected accounts only by default. Includes defaultSelected, the desktop preference for automatic selection; accounts with it disabled remain listed. Article accounts cannot publish videos and video accounts cannot publish articles.", AccountFilter, True),
     ("list_contents", "List local content summaries and platform publication states. Already submitted, published or uncertain platforms are excluded from automatic publish selection.", ContentFilter, True),
     ("get_content", "Read a saved local article/video and its current platform publication states.", ContentId, True),
     ("save_content", "Create or update a LOCAL draft. Supply content.kind explicitly, Markdown for articles, and imported asset IDs for media. This does not publish. Use articleTemplateId to choose an article template.", SaveContent, False),
     ("import_asset", "Import a user-authorized absolute local media or UTF-8 article path into Easy Publish. Returns an asset ID; article imports also return text. No platform upload occurs.", ImportAsset, False),
     ("preview_article", "Render sanitized Markdown using an article template and optional target platform. Returns HTML and platform formatting notes without publishing.", PreviewArticle, True),
-    ("preflight", "Check saved content for selected accounts without publishing. Omit accountIds to use connected, compatible accounts on platforms without a previous submitted/published/unknown result. Explicit accountIds allow intentional republication.", Selection, True),
-    ("publish", "PUBLISH saved content (or create platform drafts when mode=draft) through connected compatible accounts. This uploads content to external platforms. Call only when publication is requested. requestId must be a UUID: reuse it after uncertainty in this tool call to retrieve the SAME batch; use a NEW UUID for an intentional new publication. Omitted accountIds exclude previous submitted/published/unknown platforms. Explicit accountIds allow republication but never cross article/video types. Task results may be submitted, published, or unknown; never automatically resend unknown results.", Publish, False),
+    ("preflight", "Check saved content for selected accounts without publishing. Omit accountIds to use connected, compatible accounts with defaultSelected enabled on platforms without a previous submitted/published/unknown result. Explicit accountIds override the default-selection preference and allow intentional republication, but never cross article/video types.", Selection, True),
+    ("publish", "PUBLISH saved content (or create platform drafts when mode=draft) through connected compatible accounts. This uploads content to external platforms. Call only when publication is requested. requestId must be a UUID: reuse it after uncertainty in this tool call to retrieve the SAME batch with its original selection, even after account preferences change; use a NEW UUID for an intentional new publication. Omitted accountIds use defaultSelected accounts and exclude previous submitted/published/unknown platforms. Explicit accountIds override the default-selection preference and allow republication but never cross article/video types. Task results may be submitted, published, or unknown; never automatically resend unknown results.", Publish, False),
     ("list_batches", "List publishing batches and per-account results. A submitted receipt is not proof that content is public. Pagination is available with offset/limit.", BatchFilter, True),
     ("get_batch", "Read one publishing batch and all per-account results, including older batches. Poll this after publish; do not publish again to poll.", BatchId, True),
     ("cancel_batch", "Cancel pending work in a batch. This cannot retract content already uploaded or submitted to a platform; uncertain submitted tasks remain unknown.", BatchId, False),
@@ -139,11 +140,12 @@ def _select_accounts(service, content: dict, identifiers: list[str] | None, mode
     previous = content.get("platformPublicationStates", {})
     selection = [row["id"] for row in service.store.all("SELECT * FROM accounts WHERE status='ready' ORDER BY rowid")
                  if row["platform"] in BY_ID
+                 and service.store.account_default_selected(row["id"])
                  and content["kind"] in BY_ID[row["platform"]]["kinds"]
                  and mode in BY_ID[row["platform"]]["modes"]
                  and row["platform"] not in previous]
     if not selection:
-        raise Problem("没有尚未发布且已连接的兼容账号；如需再次发布，请明确提供对应类型的 accountIds", "no_eligible_accounts")
+        raise Problem("没有默认选中、已连接且尚未发布的兼容账号；请在账号管理开启默认选中，或明确提供对应类型的 accountIds", "no_eligible_accounts")
     return selection
 
 
@@ -197,7 +199,8 @@ async def execute_tool(service, data_dir: Path, name: str, arguments: dict) -> d
                      "notes": article_format_notes(values.platformId)}
         elif name in {"preflight", "publish"}:
             # Resolve replay before default filtering: after a successful first
-            # attempt its platforms are intentionally no longer auto-selected.
+            # attempt its platforms are intentionally no longer auto-selected,
+            # and later preference changes must not alter the original targets.
             previous = service.store.one("SELECT * FROM batches WHERE request_id=?", (str(values.requestId),)) if name == "publish" else None
             if previous:
                 selection = values.accountIds if values.accountIds is not None else json.loads(previous["selection"])
@@ -295,7 +298,7 @@ class StdioServer:
             result = {"protocolVersion": version if version in SUPPORTED_VERSIONS else PROTOCOL_VERSION,
                       "capabilities": {"tools": {"listChanged": False}},
                       "serverInfo": {"name": "easy-publish", "version": __version__},
-                      "instructions": "Keep Easy Publish desktop running. Save content locally, inspect compatible connected accounts, then call preflight. Call publish only when publication is requested, with a stable UUID requestId. Article accounts and video accounts are separate. Poll get_batch for results; never automatically republish an unknown result."}
+                      "instructions": "Keep Easy Publish desktop running. Save content locally, inspect compatible connected accounts, then call preflight. Omitted accountIds respect defaultSelected; explicit IDs can override this preference within the matching article/video type. Call publish only when publication is requested, with a stable UUID requestId. Reusing a requestId retrieves the original batch even after preferences change. Poll get_batch for results; never automatically republish an unknown result."}
         elif method == "ping":
             result = {}
         elif not self.initialized:

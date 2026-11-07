@@ -15,6 +15,7 @@ from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from ..target_projection import project_payload
 from .base import ProviderContext, ProviderResult, PublishPayload
 from ..vendor.social_auto_upload import runtime
 
@@ -90,6 +91,7 @@ def _options(payload: PublishPayload) -> dict:
 
 
 def _validate_options(payload: PublishPayload) -> None:
+    payload = project_payload(payload)
     options = _options(payload)
     if payload.platform_id == "dayu":
         source = options.get("source")
@@ -100,8 +102,6 @@ def _validate_options(payload: PublishPayload) -> None:
             parsed = urlsplit(source_url)
             if parsed.scheme not in {"http", "https"} or not parsed.hostname:
                 raise ValueError("大鱼号转载内容需要填写原文链接")
-        elif source_url:
-            raise ValueError("大鱼号仅转载内容可以填写原文链接")
         indices = options.get("cover_indices", [])
         if not isinstance(indices, list) or any(type(i) is not int for i in indices):
             raise ValueError("大鱼号封面序号必须是正文图片编号列表")
@@ -203,6 +203,7 @@ def _map_receipt(platform: str, result: dict, mode: str) -> ProviderResult:
 
 
 async def publish(payload: PublishPayload, ctx: ProviderContext) -> ProviderResult:
+    payload = project_payload(payload)
     if payload.platform_id not in ARTICLE_PLATFORMS:
         from . import social_video
         return await social_video.publish(payload, ctx)

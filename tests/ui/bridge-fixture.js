@@ -16,24 +16,26 @@
     platform("bilibili", "哔哩哔哩", "#00a1d6", ["video"], ["publish"], { titleLimit: 80, fields: [
       { key: "copyright", label: "创作类型", type: "select", required: true, kinds: ["video"], choices: [{ value: "1", label: "原创" }, { value: "2", label: "转载" }] },
       { key: "tid", label: "视频分区", type: "select", required: true, kinds: ["video"], dynamicChoices: "bilibiliCategories" },
-      { key: "source", label: "转载来源", type: "text", required: false, kinds: ["video"], hint: "转载必填，填写原始视频链接；原创请留空" },
+      { key: "source", label: "转载来源", type: "text", required: false, kinds: ["video"], hint: "转载必填，填写原始视频链接；原创会忽略此字段" },
     ] }),
   ];
   const bilibiliCategories = [{ value: "101", label: "测试分区 / 科普" }, { value: "102", label: "测试分区 / 创作" }];
   const articleTemplates = [
-    { id: "clean", name: "清爽蓝", description: "蓝色标题与留白，适合知识分享和日常文章", accent: "#2563eb" },
-    { id: "editorial", name: "墨色杂志", description: "衬线标题与细分隔线，适合观点和深度阅读", accent: "#9a3412" },
-    { id: "journal", name: "暖色手记", description: "暖色小标题与柔和引用，适合故事和生活记录", accent: "#b45309" },
-    { id: "tech", name: "理性科技", description: "青绿色层次与清晰代码块，适合技术和产品内容", accent: "#0f766e" },
+    {"id": "clean", "name": "清爽蓝", "description": "蓝色章节条、清晰列表与留白，适合知识分享", "accent": "#2563eb"},
+    {"id": "editorial", "name": "墨色杂志", "description": "米白纸面、衬线标题与双线装饰，适合深度阅读", "accent": "#9a3412"},
+    {"id": "journal", "name": "暖色手记", "description": "暖色标题卡、圆角引用与照片边框，适合生活记录", "accent": "#b45309"},
+    {"id": "tech", "name": "理性科技", "description": "深青标题、终端代码块与规整表格，适合技术文章", "accent": "#0f766e"},
+    {"id": "forest", "name": "森林来信", "description": "浅绿纸面、圆角边框与柔和强调，适合自然和人文", "accent": "#2f6b4f"},
+    {"id": "artdeco", "name": "黑金画报", "description": "黑金标题带、几何边框与高对比引用，适合专题策划", "accent": "#b7791f"},
   ];
-  const account = (id, platformId, label, status = "ready") => ({ id, platformId, label, status, message: status === "ready" ? "已连接（浏览器测试替身）" : "请连接测试账号", updatedAt: date, credentialConfigured: platformId === "wechat", ...(platformId === "bilibili" ? { bilibiliCategories: status === "ready" ? clone(bilibiliCategories) : [] } : {}) });
+  const account = (id, platformId, label, status = "ready") => ({ id, platformId, label, status, defaultSelected: true, message: status === "ready" ? "已连接（浏览器测试替身）" : "请连接测试账号", updatedAt: date, credentialConfigured: platformId === "wechat", ...(platformId === "bilibili" ? { bilibiliCategories: status === "ready" ? clone(bilibiliCategories) : [] } : {}) });
   const draft = (id, kind, title, body) => ({ id, kind, title, body, description: "", tags: [], author: "", videoAssetId: null, coverAssetId: null, imageAssetIds: [], platformOptions: {}, articleTemplateId: "clean", platformPublicationStates: {}, createdAt: date, updatedAt: date, revision: 1 });
   const state = {
     platforms, articleTemplates,
     accounts: [account("a-wechat", "wechat", "品牌公众号"), account("a-zhihu", "zhihu", "创作笔记"), account("a-dayu", "dayu", "创作工作室"), account("a-douyin", "douyin", "品牌抖音"), account("a-kuaishou", "kuaishou", "品牌快手"), account("a-xhs", "xiaohongshu", "品牌小红书"), account("a-channels", "channels", "品牌视频号", "login_required"), account("a-bilibili", "bilibili", "品牌哔哩哔哩")],
     contents: [draft("c-article", "article", "把创作的时间，还给创作", "## 少一点重复，多一点表达\n\n每一篇好内容，都值得被更多人看见。\n\n当文章写完、视频剪好，接下来的分享应该简单一些。\n\n### 这一次，专注内容本身\n\n- 在一个工作空间整理素材\n- 为不同平台选择合适的账号\n- 清楚了解每个目标的发布进度\n\n**一份创作，更多可能。**"), draft("c-article-2", "article", "从灵感到第一篇文章", "写下你的第一个想法。")],
     batches: [],
-    runtime: { browserReady: true, browserInstalling: false, browserMessage: "测试浏览器已就绪", vaultReady: true, vaultMessage: "测试凭据库已就绪", version: "0.1.4" },
+    runtime: { browserReady: true, browserInstalling: false, browserMessage: "测试浏览器已就绪", vaultReady: true, vaultMessage: "测试凭据库已就绪", version: "0.1.5" },
   };
   const assets = {};
   const calls = [];
@@ -121,7 +123,7 @@
         state.batches.push(batch);
         return clone(batch);
       }
-      if (method === "POST" && path.endsWith("/cancel")) {
+      if (method === "POST" && path.startsWith("/api/batches/") && path.endsWith("/cancel")) {
         const batch = state.batches.find((entry) => entry.id === path.split("/")[3]);
         for (const task of batch.tasks) if (["queued", "running", "submitting"].includes(task.status)) { task.status = task.status === "submitting" ? "unknown" : "cancelled"; task.canRetry = task.status === "cancelled"; }
         return { ok: true };
@@ -137,9 +139,23 @@
         state.accounts.push(item);
         return clone(item);
       }
+      if (method === "PUT" && path.startsWith("/api/accounts/") && path.endsWith("/preferences")) {
+        const account = state.accounts.find((entry) => entry.id === path.split("/")[3]);
+        account.defaultSelected = body.defaultSelected;
+        return clone(account);
+      }
+      if (method === "POST" && path.startsWith("/api/accounts/") && path.endsWith("/cancel")) {
+        const account = state.accounts.find((entry) => entry.id === path.split("/")[3]);
+        if (account.status === "logging_in") {
+          deferredLogins.delete(account.id);
+          account.status = "login_required"; account.message = "连接已取消";
+          if (account.platformId === "bilibili") account.bilibiliCategories = [];
+        }
+        return { ok: true };
+      }
       if (method === "POST" && (path.endsWith("/login") || path.endsWith("/check"))) {
         const account = state.accounts.find((entry) => entry.id === path.split("/")[3]);
-        if (path.endsWith("/login") && deferredLogins.has(account.id)) {
+        if (deferredLogins.has(account.id)) {
           account.status = "logging_in"; account.message = "等待扫码登录（测试进度）";
         } else finishLogin(account);
         return { ok: true };

@@ -14,12 +14,14 @@ import bleach
 from markdown_it import MarkdownIt
 
 
-ArticleTemplateId = Literal["clean", "editorial", "journal", "tech"]
+ArticleTemplateId = Literal["clean", "editorial", "journal", "tech", "forest", "artdeco"]
 ARTICLE_TEMPLATES = [
-    {"id": "clean", "name": "清爽蓝", "description": "蓝色标题与留白，适合知识分享和日常文章", "accent": "#2563eb"},
-    {"id": "editorial", "name": "墨色杂志", "description": "衬线标题与细分隔线，适合观点和深度阅读", "accent": "#9a3412"},
-    {"id": "journal", "name": "暖色手记", "description": "暖色小标题与柔和引用，适合故事和生活记录", "accent": "#b45309"},
-    {"id": "tech", "name": "理性科技", "description": "青绿色层次与清晰代码块，适合技术和产品内容", "accent": "#0f766e"},
+    {"id": "clean", "name": "清爽蓝", "description": "蓝色章节条、清晰列表与留白，适合知识分享", "accent": "#2563eb"},
+    {"id": "editorial", "name": "墨色杂志", "description": "米白纸面、衬线标题与双线装饰，适合深度阅读", "accent": "#9a3412"},
+    {"id": "journal", "name": "暖色手记", "description": "暖色标题卡、圆角引用与照片边框，适合生活记录", "accent": "#b45309"},
+    {"id": "tech", "name": "理性科技", "description": "深青标题、终端代码块与规整表格，适合技术文章", "accent": "#0f766e"},
+    {"id": "forest", "name": "森林来信", "description": "浅绿纸面、圆角边框与柔和强调，适合自然和人文", "accent": "#2f6b4f"},
+    {"id": "artdeco", "name": "黑金画报", "description": "黑金标题带、几何边框与高对比引用，适合专题策划", "accent": "#b7791f"},
 ]
 TEMPLATE_IDS = frozenset(item["id"] for item in ARTICLE_TEMPLATES)
 ARTICLE_PLATFORMS = frozenset({"wechat", "zhihu", "dayu", "xueqiu"})
@@ -86,54 +88,127 @@ def _text(node: _Node | str) -> str:
 
 
 def _theme(template_id: str) -> tuple[dict[str, str], dict[str, dict[str, str]]]:
-    accent = next(item["accent"] for item in ARTICLE_TEMPLATES if item["id"] == template_id)
+    # Fixed palettes and layout decisions, not user CSS or remotely loaded skins.
+    palette = {
+        "clean": ("#ffffff", "#334155", "#172554", "#2563eb", "#eff6ff", "#dbeafe", "#f8faff"),
+        "editorial": ("#fbfaf7", "#44403c", "#292524", "#9a3412", "#f2ede6", "#d6cfc4", "#f5f1ea"),
+        "journal": ("#fffaf0", "#575045", "#78350f", "#b45309", "#fff0cf", "#ead6b3", "#fff7e7"),
+        "tech": ("#ffffff", "#334155", "#123b3a", "#0f766e", "#eaf8f5", "#c3e4dc", "#f2faf8"),
+        "forest": ("#f1f7f2", "#374b40", "#214735", "#2f6b4f", "#e0eee3", "#b8d1bd", "#eaf3ec"),
+        "artdeco": ("#fffcf4", "#403a2d", "#241f16", "#b7791f", "#fff0bd", "#d9be76", "#fff6da"),
+    }[template_id]
+    paper, ink, heading, accent, soft, border, stripe = palette
     serif = template_id in {"editorial", "journal"}
-    soft = {"clean": "#eff6ff", "editorial": "#faf5f1", "journal": "#fffbeb", "tech": "#f0fdfa"}[template_id]
-    body = {"font-family": _SERIF if serif else _SANS, "font-size": "16px", "line-height": "1.85",
-            "color": "#334155", "letter-spacing": "0.2px", "max-width": "680px", "margin": "0 auto",
-            "padding": "8px 4px", "box-sizing": "border-box", "overflow-wrap": "break-word"}
-    if template_id == "editorial":
-        body.update({"font-size": "17px", "line-height": "1.95", "color": "#292524"})
-    headings = {"font-family": _SERIF if serif else _SANS, "font-weight": "700", "line-height": "1.45",
-                "color": "#172033", "margin": "32px 0 16px", "word-break": "break-word"}
+    body = {"font-family": _SERIF if serif else _SANS, "font-size": "16px", "line-height": "1.9",
+            "color": ink, "background-color": paper, "letter-spacing": "0.3px", "max-width": "680px",
+            "margin": "0 auto", "padding": "24px 20px", "box-sizing": "border-box", "overflow-wrap": "break-word"}
+    headings = {"font-family": _SERIF if serif else _SANS, "font-weight": "700", "line-height": "1.5",
+                "color": heading, "margin": "32px 0 16px", "word-break": "break-word"}
     styles = {
-        "p": {"margin": "0 0 18px", "line-height": body["line-height"]},
-        "h1": {**headings, "font-size": "28px", "margin": "28px 0 20px"},
-        "h2": {**headings, "font-size": "22px", "color": accent, "border-left": f"4px solid {accent}", "padding-left": "12px"},
-        "h3": {**headings, "font-size": "19px", "color": accent},
-        "h4": {**headings, "font-size": "17px"},
+        "p": {"margin": "0 0 20px", "line-height": "1.9", "text-align": "justify"},
+        "h1": {**headings, "font-size": "29px", "margin": "12px 0 28px", "padding-bottom": "18px", "border-bottom": f"2px solid {accent}"},
+        "h2": {**headings, "font-size": "22px", "color": accent, "background-color": soft,
+               "border-left": f"4px solid {accent}", "padding": "10px 14px", "border-radius": "0 6px 6px 0"},
+        "h3": {**headings, "font-size": "19px", "color": heading, "padding-bottom": "7px", "border-bottom": f"1px solid {border}"},
+        "h4": {**headings, "font-size": "17px", "color": accent},
         "h5": {**headings, "font-size": "16px"},
-        "h6": {**headings, "font-size": "16px", "color": "#64748b"},
-        "blockquote": {"margin": "24px 0", "padding": "16px 18px", "border-left": f"3px solid {accent}",
-                       "background-color": soft, "color": "#475569", "border-radius": "0 8px 8px 0"},
-        "strong": {"font-weight": "700", "color": "#172033"},
+        "h6": {**headings, "font-size": "15px", "color": "#596579"},
+        "blockquote": {"margin": "26px 0", "padding": "18px 20px", "border-left": f"3px solid {accent}",
+                       "background-color": soft, "color": ink, "border-radius": "0 10px 10px 0"},
+        "quote_p": {"margin": "0 0 10px", "line-height": "1.85"},
+        "quote_emphasis": {"color": heading},
+        "quote_code": {"color": heading, "background-color": paper, "border": f"1px solid {border}"},
+        "strong": {"font-weight": "700", "color": heading, "background-color": soft, "padding": "0 2px"},
         "em": {"font-style": "italic"}, "s": {"text-decoration": "line-through"},
-        "ul": {"padding-left": "24px", "margin": "16px 0 22px", "list-style-type": "disc"},
-        "ol": {"padding-left": "24px", "margin": "16px 0 22px", "list-style-type": "decimal"},
-        "li": {"margin": "8px 0", "line-height": body["line-height"]},
+        "ul": {"padding-left": "25px", "margin": "18px 0 24px", "list-style-type": "disc"},
+        "ol": {"padding-left": "28px", "margin": "18px 0 24px", "list-style-type": "decimal"},
+        "li": {"margin": "9px 0", "padding-left": "4px", "line-height": "1.85"},
         "a": {"color": accent, "text-decoration": "underline", "word-break": "break-all"},
-        "img": {"display": "block", "max-width": "100%", "height": "auto", "margin": "22px auto", "border-radius": "8px"},
-        "hr": {"border": "0", "border-top": "1px solid #cbd5e1", "margin": "32px 0"},
-        "pre": {"font-family": _MONO, "font-size": "14px", "line-height": "1.7", "color": "#0f172a",
-                "background-color": "#f1f5f9", "padding": "18px", "margin": "24px 0", "border-radius": "10px",
-                "white-space": "pre-wrap", "word-break": "break-word"},
-        "code": {"font-family": _MONO, "font-size": "14px", "background-color": soft, "color": accent},
-        "table": {"width": "100%", "table-layout": "fixed", "border-collapse": "collapse", "margin": "24px 0", "font-size": "14px"},
-        "th": {"border": "1px solid #cbd5e1", "padding": "10px 12px", "text-align": "left", "background-color": soft,
-               "font-weight": "700", "color": "#172033", "word-break": "break-word"},
-        "td": {"border": "1px solid #cbd5e1", "padding": "10px 12px", "text-align": "left", "word-break": "break-word"},
+        "img": {"display": "block", "max-width": "100%", "height": "auto", "margin": "24px auto 12px", "border-radius": "8px", "box-sizing": "border-box"},
+        "caption": {"display": "block", "font-size": "13px", "line-height": "1.65", "text-align": "center",
+                    "color": "#68717d", "margin": "0 4px 22px", "letter-spacing": "0.2px"},
+        "hr": {"border": "0", "border-top": f"1px solid {border}", "margin": "36px 0"},
+        "pre": {"font-family": _MONO, "font-size": "13px", "line-height": "1.75", "color": heading,
+                "background-color": soft, "border": f"1px solid {border}", "border-top": f"3px solid {accent}",
+                "padding": "18px 16px", "margin": "26px 0", "border-radius": "8px",
+                "white-space": "pre-wrap", "word-break": "break-word", "overflow-wrap": "anywhere"},
+        "code": {"font-family": _MONO, "font-size": "14px", "background-color": soft, "color": accent,
+                 "padding": "2px 5px", "border": f"1px solid {border}", "border-radius": "4px", "word-break": "break-word"},
+        "pre_code": {"font-family": _MONO, "font-size": "13px", "line-height": "1.75", "color": heading,
+                     "background-color": soft, "padding": "0", "margin": "0", "border": "0", "border-radius": "0",
+                     "white-space": "pre-wrap", "word-break": "break-word", "overflow-wrap": "anywhere"},
+        "table": {"width": "100%", "table-layout": "fixed", "border-collapse": "collapse", "margin": "26px 0", "font-size": "14px"},
+        "th": {"border": f"1px solid {border}", "padding": "11px 10px", "text-align": "left", "background-color": accent,
+               "font-weight": "700", "color": "#ffffff", "word-break": "break-word", "line-height": "1.6"},
+        "td": {"border": f"1px solid {border}", "padding": "10px", "text-align": "left", "color": ink,
+               "background-color": paper, "word-break": "break-word", "line-height": "1.7"},
+        "stripe": {"background-color": stripe},
     }
     if template_id == "editorial":
-        styles["h2"] = {**headings, "font-size": "24px", "color": "#1c1917", "padding-bottom": "12px", "border-bottom": "1px solid #a8a29e"}
-        styles["blockquote"].update({"font-style": "italic", "background-color": "#fafaf9", "border-left": "2px solid #a8a29e"})
+        body.update({"font-size": "17px", "line-height": "2", "padding": "28px 22px"})
+        styles["p"].update({"line-height": "2", "letter-spacing": "0.5px"})
+        styles["h1"].update({"font-size": "28px", "font-weight": "600", "text-align": "center", "letter-spacing": "3px",
+                              "padding": "24px 8px", "border-top": f"3px double {heading}", "border-bottom": f"3px double {heading}"})
+        styles["h2"] = {**headings, "font-size": "23px", "font-weight": "600", "letter-spacing": "2px",
+                        "padding": "10px 0", "border-top": f"1px solid {border}", "border-bottom": f"1px solid {border}"}
+        styles["blockquote"].update({"background-color": "#f2ede6", "border-left": f"2px solid {accent}", "border-radius": "0", "font-style": "italic"})
+        styles["strong"].update({"color": accent, "background-color": "transparent", "padding": "0", "border-bottom": f"1px dotted {accent}"})
+        styles["img"].update({"border-radius": "0", "border": "1px solid #e7e0d6", "padding": "5px", "background-color": "#ffffff"})
+        styles["th"].update({"background-color": heading})
+        styles["pre"].update({"border-radius": "0", "border-top": f"1px solid {border}"})
     elif template_id == "journal":
-        styles["h2"].update({"border-left": "0", "padding": "10px 14px", "background-color": "#fef3c7", "border-radius": "8px"})
-        styles["blockquote"].update({"border-left": "0", "border-radius": "12px", "color": "#78350f"})
+        styles["h1"].update({"font-size": "27px", "padding": "20px 18px", "background-color": "#fff0cf", "border": f"1px solid {border}", "border-radius": "14px"})
+        styles["h2"] = {**headings, "font-size": "21px", "display": "inline-block", "background-color": "#f9e3ae", "color": heading,
+                        "padding": "7px 16px", "border-radius": "18px"}
+        styles["h3"].update({"border-bottom": f"1px dashed {border}"})
+        styles["blockquote"].update({"border": f"1px dashed {accent}", "border-left": f"1px dashed {accent}", "border-radius": "14px", "padding": "20px"})
+        styles["li"].update({"padding": "6px 8px", "background-color": "#fff5df", "border-radius": "6px"})
+        styles["img"].update({"border": "5px solid #ffffff", "box-shadow": "0 2px 7px #e6d8bf", "border-radius": "6px"})
+        styles["pre"].update({"border-top": f"1px solid {border}", "border-radius": "12px"})
+        styles["code"]["color"] = "#92400e"
     elif template_id == "tech":
-        styles["h2"] = {**headings, "font-size": "21px", "color": accent, "padding-bottom": "10px", "border-bottom": "2px solid #99f6e4"}
-        styles["pre"].update({"background-color": "#f0fdfa", "border": "1px solid #99f6e4"})
+        styles["h1"].update({"font-size": "27px", "color": "#ffffff", "background-color": heading, "padding": "22px 18px",
+                              "border-bottom": "4px solid #78cbb7", "border-radius": "4px"})
+        styles["h2"] = {**headings, "font-size": "21px", "color": accent, "padding": "8px 0 10px",
+                        "border-bottom": "2px solid #8cd5c3", "font-family": _SANS}
+        styles["h3"].update({"border-bottom": "0", "border-left": f"3px solid {accent}", "padding": "0 0 0 10px"})
+        styles["blockquote"].update({"border": "1px solid #b8ded4", "border-left": f"4px solid {accent}", "border-radius": "4px"})
+        styles["ul"]["list-style-type"] = "square"
+        styles["pre"].update({"background-color": "#142f35", "color": "#e0f2ed", "border": "1px solid #244b51", "border-top": "4px solid #0f766e"})
+        styles["pre_code"].update({"background-color": "#142f35", "color": "#e0f2ed"})
+        styles["th"].update({"background-color": heading})
+    elif template_id == "forest":
+        body["padding"] = "24px 20px"
+        styles["h1"].update({"font-size": "27px", "text-align": "center", "padding": "22px 16px", "background-color": "#ffffff",
+                              "border": f"2px solid {accent}", "border-radius": "12px", "box-shadow": "3px 3px 0 #c4dac9"})
+        styles["h2"].update({"color": heading, "border-left": f"5px solid {accent}", "background-color": "#ffffff", "border-radius": "0 12px 12px 0"})
+        styles["blockquote"].update({"border": f"1px solid {border}", "border-left": f"1px solid {border}", "border-radius": "14px"})
+        styles["strong"].update({"background-color": "#e6dcb8", "color": heading})
+        styles["img"].update({"border": "1px solid #aec7b4", "border-radius": "12px", "padding": "4px", "background-color": "#ffffff"})
+        styles["pre"].update({"background-color": "#213d30", "color": "#e5f0e8", "border": "1px solid #37604b"})
+        styles["pre_code"].update({"background-color": "#213d30", "color": "#e5f0e8"})
+        styles["hr"].update({"border-top": f"3px double {accent}"})
+    elif template_id == "artdeco":
+        body.update({"padding": "24px 20px", "letter-spacing": "0.5px"})
+        styles["h1"].update({"font-size": "28px", "font-weight": "800", "text-align": "center", "letter-spacing": "2px",
+                              "background-color": "#f4cf65", "padding": "22px 14px", "border": f"3px solid {heading}",
+                              "box-shadow": "4px 4px 0 #241f16"})
+        styles["h2"] = {**headings, "font-size": "22px", "font-weight": "800", "color": "#f8df93", "background-color": heading,
+                        "padding": "11px 15px", "border-bottom": "3px solid #e8bc42"}
+        styles["h3"].update({"border-bottom": "2px solid #d9b64c"})
+        styles["blockquote"].update({"background-color": "#302b20", "color": "#fff6d9", "border": "1px solid #d6ad40",
+                                     "border-left": "4px solid #e8bc42", "border-radius": "0"})
+        styles["quote_emphasis"]["color"] = "#ffe195"
+        styles["quote_code"].update({"color": "#241f16", "background-color": "#ffe8a7", "border": "1px solid #d6ad40"})
+        styles["strong"].update({"color": heading, "background-color": "#f6dc8c", "padding": "1px 4px"})
+        styles["img"].update({"border": f"2px solid {heading}", "border-radius": "0", "box-shadow": "3px 3px 0 #e5bf55"})
+        styles["pre"].update({"background-color": "#29251c", "color": "#fff0bb", "border": "2px solid #29251c", "border-top": "4px solid #e6bd50", "border-radius": "0"})
+        styles["pre_code"].update({"background-color": "#29251c", "color": "#fff0bb"})
+        styles["th"].update({"background-color": heading, "color": "#ffe5a0", "border": f"1px solid {heading}"})
+        styles["hr"].update({"border-top": "4px double #b7791f"})
+        for tag in ("a", "code", "h4"):
+            styles[tag]["color"] = "#80540b"
     return body, styles
-
 
 def _style(values: dict[str, str]) -> str:
     return ";".join(f"{key}:{value}" for key, value in values.items())
@@ -143,12 +218,44 @@ class _Renderer:
     def __init__(self, template_id: str, platform_id: str | None):
         self.platform_id = platform_id
         self.styled = platform_id in {None, "wechat", "dayu"}
+        self.rich = platform_id in {None, "wechat"}
+        self.ancestors: list[str] = []
         self.body_style, self.styles = _theme(template_id)
 
-    def element(self, tag: str, content: str, attrs: dict[str, str] | None = None, style_tag: str | None = None) -> str:
+    def element(self, tag: str, content: str, attrs: dict[str, str] | None = None, style_tag: str | None = None,
+                extra_style: dict[str, str] | None = None) -> str:
         attrs = dict(attrs or {})
         if self.styled and self.styles.get(style_tag or tag):
-            attrs["style"] = _style(self.styles[style_tag or tag])
+            style_key = style_tag or tag
+            values = dict(self.styles[style_key])
+            # Quote text inherits its card color; inline emphasis must not bring
+            # a dark foreground or pale highlight onto a dark quote card.
+            regions = {"blockquote", "table", "pre"} if self.rich else {"blockquote", "pre"}
+            region = next((ancestor for ancestor in reversed(self.ancestors) if ancestor in regions), None)
+            if region == "blockquote":
+                if tag == "p":
+                    values.update(self.styles["quote_p"])
+                elif style_key in {"strong", "a"}:
+                    values.update(self.styles["quote_emphasis"])
+                    values["background-color"] = "transparent"
+                elif style_key == "code":
+                    values.update(self.styles["quote_code"])
+                elif tag.startswith("h") and tag[1:] in {"1", "2", "3", "4", "5", "6"}:
+                    values.update({"color": self.styles["blockquote"]["color"], "background-color": "transparent"})
+                elif style_tag == "caption":
+                    values["color"] = self.styles["blockquote"]["color"]
+            heading = next((ancestor for ancestor in reversed(self.ancestors) if ancestor in {"h1", "h2", "h3", "h4", "h5", "h6"}), None)
+            if (heading or "th" in self.ancestors) and style_key in {"a", "strong", "em", "s"}:
+                # Dayu translates colors into font attributes instead of letting
+                # the browser cascade them, so resolve its inherited ink here.
+                color = "inherit" if self.rich else self.styles["blockquote" if region == "blockquote" else heading]["color"]
+                values.update({"color": color, "background-color": "transparent"})
+            if "th" in self.ancestors and (tag == "code" or style_tag == "caption"):
+                values.update({"color": "inherit", "background-color": "transparent"})
+                if tag == "code":
+                    values["border"] = "1px solid " + self.styles["th"]["color"]
+            values.update(extra_style or {})
+            attrs["style"] = _style(values)
         attr_html = "".join(f' {key}="{escape(value, quote=True)}"' for key, value in attrs.items())
         return f"<{tag}{attr_html}>" if tag in _VOID else f"<{tag}{attr_html}>{content}</{tag}>"
 
@@ -193,9 +300,48 @@ class _Renderer:
     def render(self, node: _Node | str, depth: int = 0) -> str:
         if isinstance(node, str):
             return escape(node)
+        self.ancestors.append(node.tag)
+        try:
+            return self.render_node(node, depth)
+        finally:
+            self.ancestors.pop()
+
+    def styled_table(self, node: _Node, depth: int) -> str:
+        headers, rows = [], []
+        row_number = 0
+        for row in self.table_rows(node):
+            cells = [cell for cell in row.children if isinstance(cell, _Node) and cell.tag in {"th", "td"}]
+            is_header = bool(cells) and all(cell.tag == "th" for cell in cells)
+            stripe = None if is_header or row_number % 2 == 0 else self.styles["stripe"]
+            rendered_cells = []
+            for cell in cells:
+                self.ancestors.append(cell.tag)
+                try:
+                    rendered_cells.append(self.element(cell.tag, self.children(cell, depth), cell.attrs, extra_style=stripe))
+                finally:
+                    self.ancestors.pop()
+            line = "".join(rendered_cells)
+            (headers if is_header else rows).append(self.element("tr", line))
+            if not is_header:
+                row_number += 1
+        content = (self.element("thead", "".join(headers)) if headers else "") + self.element("tbody", "".join(rows))
+        return self.element("table", content)
+
+    def render_node(self, node: _Node, depth: int = 0) -> str:
         tag, attrs = node.tag, dict(node.attrs)
         if tag == "root":
             return self.children(node, depth)
+        if tag == "table" and self.rich:
+            return self.styled_table(node, depth)
+        if tag == "img" and self.rich:
+            image = self.element("img", "", attrs)
+            # A Markdown image title is explicit author-provided caption text.
+            # Keep it inline-safe even when an image occurs inside a paragraph,
+            # table cell or link; never invent a caption from alt text/filenames.
+            caption = attrs.get("title", "").strip()
+            return image + (self.element("span", escape(caption), style_tag="caption") if caption else "")
+        if tag == "code" and "pre" in self.ancestors and self.styled:
+            return self.element("code", self.children(node, depth), attrs, style_tag="pre_code")
         if tag == "table" and self.platform_id in {"zhihu", "dayu", "xueqiu"}:
             rows = []
             for row in self.table_rows(node):

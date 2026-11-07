@@ -1,17 +1,16 @@
 import { useEffect, useRef, useState } from "react";
 import { ArrowRight, Check, CheckCheck, ChevronRight, FileText, Film, ImagePlus, MoreHorizontal, Plus, Save, Search, Send, ShieldCheck, Trash2, Upload, X } from "lucide-react";
 import { bridge, errorMessage, request } from "./api";
-import MarkdownPreview, { AssetImage, useAssetMetadata } from "./MarkdownPreview";
+import MarkdownPreview, { ArticleTemplateThumbnail, AssetImage, useAssetMetadata } from "./MarkdownPreview";
 import { byteLabel, dateLabel, InlineError, Modal, PlatformMark, Spinner } from "./ui";
 import type { Account, ArticleTemplate, Asset, Batch, Content, ContentInput, ContentKind, Platform, PlatformField, Preflight, PublishMode } from "./shared/types";
 
 const newContent = (kind: ContentKind): ContentInput => ({ kind, title: "", body: "", description: "", tags: [], author: "", videoAssetId: null, coverAssetId: null, imageAssetIds: [], platformOptions: {}, articleTemplateId: "clean" });
 const asInput = (content: Content): ContentInput => ({ kind: content.kind, title: content.title, body: content.body, description: content.description, tags: content.tags, author: content.author, videoAssetId: content.videoAssetId, coverAssetId: content.coverAssetId, imageAssetIds: content.imageAssetIds, platformOptions: content.platformOptions || {}, articleTemplateId: content.articleTemplateId || "clean" });
 
-function defaultTargets(content: Content | undefined, accounts: Account[], platforms: Platform[], mode: PublishMode) {
+function defaultTargets(content: Content | undefined, kind: ContentKind, accounts: Account[], platforms: Platform[], mode: PublishMode) {
   const history = content?.platformPublicationStates || {};
-  if (!content || !Object.keys(history).length) return [];
-  return accounts.filter((account) => account.status === "ready" && !history[account.platformId] && platforms.some((platform) => platform.id === account.platformId && platform.kinds.includes(content.kind) && platform.modes.includes(mode))).map((account) => account.id);
+  return accounts.filter((account) => account.status === "ready" && account.defaultSelected !== false && !history[account.platformId] && platforms.some((platform) => platform.id === account.platformId && platform.kinds.includes(kind) && platform.modes.includes(mode))).map((account) => account.id);
 }
 
 const publicationLabels = { submitted: "此前已提交", published: "此前已发布", unknown: "结果待确认" };
@@ -46,7 +45,9 @@ export default function DraftWorkspace({ kind, contents, platforms, accounts, ar
   const [tab, setTab] = useState<"edit" | "preview">("edit");
   const [previewPlatform, setPreviewPlatform] = useState("");
   const [mode, setMode] = useState<PublishMode>("publish");
-  const [selected, setSelected] = useState<string[]>(() => defaultTargets(initial, accounts, platforms, "publish"));
+  const [selected, setSelected] = useState<string[]>(() => defaultTargets(initial, kind, accounts, platforms, "publish"));
+  const manualTargets = useRef<Record<string, boolean>>({});
+  const previousPreferences = useRef<Record<string, boolean>>(Object.fromEntries(accounts.map((account) => [account.id, account.defaultSelected !== false])));
   const [preflight, setPreflight] = useState<Preflight | null>(null);
   const [checkedContent, setCheckedContent] = useState<string | null>(null);
   const [pendingSelection, setPendingSelection] = useState<Content | "new" | null>(null);
@@ -75,24 +76,45 @@ export default function DraftWorkspace({ kind, contents, platforms, accounts, ar
     enqueueId.current = null;
   }, [form, selected, mode, categoryAvailability]);
 
-  // Accounts may expire while a draft is being edited. Keep the checked audience valid.
+  // Reconcile actual preference/availability changes without resetting manual
+  // choices, preflight or unsaved text on every routine state poll.
   const availability = readyAccounts.map((account) => account.id).sort().join(",");
+  const preferenceKey = JSON.stringify(accounts.map((account) => [account.id, account.defaultSelected !== false]).sort());
   useEffect(() => {
-    const allowed = availability ? availability.split(",") : [];
-    setSelected((previous) => {
-      const next = previous.filter((id) => allowed.includes(id));
-      return previous.length === next.length ? previous : next;
-    });
-  }, [availability]);
-
-  useEffect(() => {
+    const preferences = Object.fromEntries(accounts.map((account) => [account.id, account.defaultSelected !== false]));
+    for (const account of accounts) {
+      if (account.id in previousPreferences.current && previousPreferences.current[account.id] !== preferences[account.id]) {
+        delete manualTargets.current[account.id];
+      }
+    }
+    previousPreferences.current = preferences;
     const previous = previousPublication.current;
     previousPublication.current = { contentId, key: publicationKey };
-    if (previous.contentId !== contentId || previous.key === publicationKey) return;
-    const oldStates = JSON.parse(previous.key) as Content["platformPublicationStates"];
-    const newlyRecorded = Object.keys(publicationStates).filter((id) => publicationStates[id] !== oldStates[id]);
-    setSelected((ids) => ids.filter((id) => !accounts.some((account) => account.id === id && newlyRecorded.includes(account.platformId))));
-  }, [contentId, publicationKey]);
+    if (previous.contentId === contentId && previous.key !== publicationKey) {
+      const oldStates = JSON.parse(previous.key) as Content["platformPublicationStates"];
+      for (const account of accounts) {
+        if (publicationStates[account.platformId] && publicationStates[account.platformId] !== oldStates[account.platformId]) delete manualTargets.current[account.id];
+      }
+    }
+    const next = readyAccounts.filter((account) => manualTargets.current[account.id] ?? (preferences[account.id] && !publicationStates[account.platformId])).map((account) => account.id);
+    setSelected((ids) => ids.length === next.length && ids.every((id) => next.includes(id)) ? ids : next);
+  }, [availability, preferenceKey, contentId, publicationKey, mode]);
+
+  function resetTargets(content: Content | undefined) {
+    manualTargets.current = {};
+    setSelected(defaultTargets(content, kind, accounts, platforms, mode));
+  }
+
+  function selectTarget(identifier: string, checked: boolean) {
+    manualTargets.current[identifier] = checked;
+    setSelected((ids) => checked ? [...new Set([...ids, identifier])] : ids.filter((id) => id !== identifier));
+  }
+
+  function selectAllTargets() {
+    const checked = selected.length !== readyAccounts.length;
+    for (const account of readyAccounts) manualTargets.current[account.id] = checked;
+    setSelected(checked ? readyAccounts.map((account) => account.id) : []);
+  }
 
   function update<K extends keyof ContentInput>(key: K, value: ContentInput[K]) {
     setForm((previous) => ({ ...previous, [key]: value }));
@@ -115,13 +137,13 @@ export default function DraftWorkspace({ kind, contents, platforms, accounts, ar
     setSavedSnapshot(JSON.stringify(input));
     setPendingSelection(null);
     setError(null);
-    setSelected(defaultTargets(entry === "new" ? undefined : entry, accounts, platforms, mode));
+    resetTargets(entry === "new" ? undefined : entry);
     setTagInput("");
   }
 
   function choose(entry: Content | "new") {
     if (entry !== "new" && entry.id === contentId) {
-      if (Object.keys(entry.platformPublicationStates || {}).length) setSelected(defaultTargets(entry, accounts, platforms, mode));
+      if (Object.keys(entry.platformPublicationStates || {}).length) resetTargets(entry);
       return;
     }
     if (dirty) setPendingSelection(entry);
@@ -220,7 +242,7 @@ export default function DraftWorkspace({ kind, contents, platforms, accounts, ar
           <div className="title-meta"><span>{article ? "好内容，从一个好标题开始" : "标题会同步到你选择的平台"}</span><span>{form.title.length} 字</span></div>
 
           {article ? <div className="article-body">
-            <div className="article-template-picker"><div className="section-label"><h3>文章模板</h3><span>发布时自动适配平台</span></div><div className="template-options" role="group" aria-label="文章模板">{articleTemplates.map((template) => <button type="button" key={template.id} className={`template-option ${form.articleTemplateId === template.id ? "selected" : ""}`} aria-pressed={form.articleTemplateId === template.id} onClick={() => { update("articleTemplateId", template.id); setTab("preview"); }}><span className="template-swatch" style={{ borderColor: template.accent }} aria-hidden="true"><i style={{ backgroundColor: template.accent }} /><i /><i /></span><span><strong>{template.name}</strong><small>{template.description}</small></span>{form.articleTemplateId === template.id && <Check size={14} />}</button>)}</div></div>
+            <div className="article-template-picker"><div className="section-label"><h3>文章模板</h3><span>选择版式，实时预览</span></div><div className="template-options" role="group" aria-label="文章模板">{articleTemplates.map((template) => <button type="button" key={template.id} className={`template-option ${form.articleTemplateId === template.id ? "selected" : ""}`} aria-pressed={form.articleTemplateId === template.id} onClick={() => { update("articleTemplateId", template.id); setTab("preview"); }}><ArticleTemplateThumbnail templateId={template.id} /><span><strong>{template.name}</strong><small>{template.description}</small></span>{form.articleTemplateId === template.id && <Check size={14} />}</button>)}</div></div>
             <div className="body-toolbar"><div className="segmented-control"><button className={tab === "edit" ? "active" : ""} onClick={() => setTab("edit")}>编辑</button><button className={tab === "preview" ? "active" : ""} onClick={() => setTab("preview")}>预览</button></div><div className="toolbar-actions"><span className="markdown-hint">Markdown</span><button className="icon-button" aria-label="导入文章文件" title="导入 Markdown / 文本" onClick={() => importFile("article")}><Upload size={16} /></button><button className="icon-button" aria-label="插入正文图片" title="插入正文图片" onClick={() => importFile("image", "body")}><ImagePlus size={16} /></button></div></div>
             {tab === "edit" ? <textarea ref={bodyRef} className="markdown-editor" aria-label="文章正文" placeholder={"从这里开始写作…\n\n支持 Markdown 格式：\n## 小标题\n**重点内容**\n\n点击右上角图片按钮，插入本地图片。"} value={form.body} onChange={(event) => update("body", event.target.value)} spellCheck={false} /> : <><label className="preview-platform"><span>预览效果</span><select aria-label="文章预览平台" value={previewPlatform} onChange={(event) => setPreviewPlatform(event.target.value)}><option value="">模板效果</option>{kindPlatforms.map((platform) => <option key={platform.id} value={platform.id}>{platform.name}</option>)}</select></label><MarkdownPreview source={form.body} assetIds={form.imageAssetIds} templateId={form.articleTemplateId} platformId={previewPlatform || undefined} onError={setError} /></>}
             <div className="editor-footer"><span>{form.body.length.toLocaleString()} 字符</span><span>正文图片通过导入按钮添加</span></div>
@@ -246,14 +268,14 @@ export default function DraftWorkspace({ kind, contents, platforms, accounts, ar
         <div className="panel-heading"><h2><Send size={16} />发布到平台</h2><span className="count-pill">{selected.length}</span></div>
         <div className="publish-mode"><button className={mode === "publish" ? "active" : ""} onClick={() => setMode("publish")} disabled={!!busy}>发布内容</button><button className={mode === "draft" ? "active" : ""} onClick={() => setMode("draft")} disabled={!!busy}>平台草稿</button></div>
         <p className="publish-description">{mode === "draft" ? "保存到支持草稿的平台，稍后到平台编辑发布。" : "选择账号后检查内容，为每个目标创建独立任务。"}</p>
-        {Object.keys(publicationStates).length > 0 && <div className="republish-note"><strong>继续发布这份稿件</strong><p>已有提交记录的平台默认不选。可以手动勾选，再次发布新任务。</p><button className="text-button" disabled={!!busy} onClick={() => setSelected(defaultTargets(current, accounts, platforms, mode))}>选择尚未发布的平台</button></div>}
-        <div className="target-heading"><span>选择账号</span><button className="text-button" onClick={() => setSelected(selected.length === readyAccounts.length ? [] : readyAccounts.map((account) => account.id))} disabled={!!busy || !readyAccounts.length}>{selected.length && selected.length === readyAccounts.length ? "取消全选" : "全选"}</button></div>
+        {Object.keys(publicationStates).length > 0 && <div className="republish-note"><strong>继续发布这份稿件</strong><p>已有提交记录的平台默认不选。可以手动勾选，再次发布新任务。</p><button className="text-button" disabled={!!busy} onClick={() => resetTargets(current)}>选择尚未发布的平台</button></div>}
+        <div className="target-heading"><span>选择账号</span><button className="text-button" onClick={selectAllTargets} disabled={!!busy || !readyAccounts.length}>{selected.length && selected.length === readyAccounts.length ? "取消全选" : "全选"}</button></div>
         <div className="publish-targets">{relevantAccounts.map((account) => {
           const platform = platforms.find((item) => item.id === account.platformId)!;
           const supported = platform.modes.includes(mode);
           const available = account.status === "ready" && supported;
           const previousStatus = publicationStates[platform.id];
-          return <label key={account.id} className={`target-card ${selected.includes(account.id) ? "selected" : ""} ${!available ? "unavailable" : ""}`}><input type="checkbox" checked={selected.includes(account.id)} disabled={!available || !!busy} onChange={(event) => setSelected(event.target.checked ? [...selected, account.id] : selected.filter((id) => id !== account.id))} /><PlatformMark platform={platform} size="small" /><span className="target-info"><strong>{account.label}</strong><small>{platform.name}{!supported ? ` · 不支持${mode === "draft" ? "草稿" : "直接发布"}` : account.status !== "ready" ? " · 请先连接" : ""}</small>{previousStatus && <span className={`publication-history ${previousStatus}`}>{publicationLabels[previousStatus]}</span>}</span></label>;
+          return <label key={account.id} className={`target-card ${selected.includes(account.id) ? "selected" : ""} ${!available ? "unavailable" : ""}`}><input type="checkbox" checked={selected.includes(account.id)} disabled={!available || !!busy} onChange={(event) => selectTarget(account.id, event.target.checked)} /><PlatformMark platform={platform} size="small" /><span className="target-info"><strong>{account.label}</strong><small>{platform.name}{!supported ? ` · 不支持${mode === "draft" ? "草稿" : "直接发布"}` : account.status !== "ready" ? " · 请先连接" : ""}</small>{previousStatus && <span className={`publication-history ${previousStatus}`}>{publicationLabels[previousStatus]}</span>}</span></label>;
         })}
           {!relevantAccounts.length && <div className="no-targets"><span className="small-empty-icon"><Send size={22} /></span><strong>添加你的第一个账号</strong><p>连接支持{article ? "文章" : "视频"}的平台后，即可批量发布。</p><button className="button small" onClick={onAccounts}><Plus size={14} />添加账号</button></div>}
         </div>

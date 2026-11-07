@@ -168,6 +168,8 @@ async def test_metadata_error_identifies_stage_and_does_not_drop_cover(account, 
 # Deliberately show an editable title/body and enabled publish button throughout
 # upload. The old adapter filled and submitted them before the upload finished.
 UPLOAD_HTML = """<!doctype html><meta charset="utf-8">
+<div class="user-info"><img class="user_avatar" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw=="><span>fixture creator</span></div>
+<script>localStorage.setItem('USER_INFO_FOR_BIZ', JSON.stringify({userId:'fixture-id',userName:'fixture creator'}));</script>
 <div class="cover-container"><input class="upload-input" type="file" accept=".mp4,.mov">
 <div id="status" class="canceled">拖拽或点击上传</div></div>
 <input id="title" placeholder="填写标题会有更多赞哦">

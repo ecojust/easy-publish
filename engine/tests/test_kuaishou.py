@@ -398,12 +398,11 @@ async def test_remote_identity_mismatch_stops_before_upload(setup):
     assert not any(event["event"] == "submitting" for event in events)
 
 
-@pytest.mark.parametrize("change", ["draft", "article", "options", "bad_cover"])
+@pytest.mark.parametrize("change", ["draft", "article", "bad_cover"])
 def test_unsupported_content_is_rejected_explicitly(setup, change):
     payload, ctx, _ = setup
     if change == "draft": payload.mode = "draft"
     if change == "article": payload.kind = "article"
-    if change == "options": payload.options = {"ignored": "value"}
     if change == "bad_cover":
         payload.cover_path = ctx.workspace / "bad.png"
         payload.cover_path.write_text("not a picture")
@@ -606,3 +605,12 @@ document.getElementById('publish').onclick=async()=>{
     assert submitted["fileId"] == "owned-file" and submitted["coverReady"] is True
     assert ks._normalize_caption(submitted["caption"]) == ks._normalize_caption(ks.caption_text(payload.title, payload.description, payload.tags))
     assert [event["event"] for event in events].count("submitting") == 1
+
+
+def test_unused_options_do_not_override_real_kuaishou_requirements(setup):
+    payload, _, _ = setup
+    payload.options = {"copyright": "2", "source": "not needed", "unknown": "other-platform"}
+    assert ks._validate(payload) is None
+    payload.title = "标题" * 101
+    assert "标题" in ks._validate(payload)
+    assert payload.options["source"] == "not needed"

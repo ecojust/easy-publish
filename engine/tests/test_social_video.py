@@ -43,13 +43,24 @@ class VideoAdapterTests(unittest.IsolatedAsyncioTestCase):
         browser.assert_not_called()
         self.assertFalse(self.events)
 
-    async def test_custom_cover_not_silently_dropped(self):
-        self.payload.cover_path = self.media
-        with patch.object(video, "_browser_page") as browser:
+    async def test_douyin_ignores_cover_before_validation_and_publication(self):
+        self.payload.cover_path = self.root / "missing-other-platform-cover.png"
+        self.assertIsNone(video._validate(self.payload, "douyin"))
+        self.ctx.session_path.write_text("{}")
+        factory, context, page = self.browser_fixture()
+        seen = []
+
+        async def prepare(actual_page, platform, payload, ctx):
+            seen.append(payload)
+            self.assertIsNone(payload.cover_path)
+            ctx.submitting()
+            return MagicMock()
+
+        with patch.object(video, "_browser_page", factory), patch.object(video, "_wait_login", AsyncMock(return_value=page)), patch.object(video, "_douyin_upload_page", AsyncMock()), patch.object(video, "_prepare", prepare), patch.object(video, "_submit_once", AsyncMock(return_value=ProviderResult("submitted", "fixture"))):
             result = await video.publish(self.payload, self.ctx)
-        self.assertEqual(result.status, "needs_attention")
-        self.assertIn("自定义封面", result.message)
-        browser.assert_not_called()
+        self.assertEqual(result.status, "submitted")
+        self.assertEqual(len(seen), 1)
+        self.assertIsNotNone(self.payload.cover_path)
 
     async def test_unknown_platform_is_unavailable_without_opening_browser(self):
         self.payload.platform_id = "unknown-platform"
@@ -171,7 +182,7 @@ class VideoAdapterTests(unittest.IsolatedAsyncioTestCase):
         entry.click = AsyncMock(side_effect=click)
         page = MagicMock()
         page.locator.return_value.filter.return_value = entry
-        with self.assertRaisesRegex(RuntimeError, "fixture abort"):
+        with patch.object(video, "_channels_entry", AsyncMock(return_value=entry)), self.assertRaisesRegex(RuntimeError, "fixture abort"):
             await video._prepare(page, "channels", self.payload, self.ctx)
         entry.click.assert_awaited_once()
         self.assertEqual(len(self.events), 1)

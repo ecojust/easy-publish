@@ -13,6 +13,7 @@ import re
 from urllib.parse import urlsplit
 
 from ..browser import browser_launch_options
+from ..target_projection import project_payload
 from .base import ProviderContext, ProviderResult, PublishPayload
 
 
@@ -61,10 +62,9 @@ def metadata_errors(title: str, description: str, tags: list[str]) -> list[str]:
 
 
 def _validate(payload: PublishPayload) -> str | None:
+    payload = project_payload(payload)
     if payload.kind != "video" or payload.mode != "publish":
         return "快手当前支持视频正式投稿，不支持文章或平台草稿"
-    if payload.options:
-        return "快手平台选项无效"
     errors = metadata_errors(payload.title, payload.description, payload.tags)
     if errors:
         return errors[0]
@@ -488,6 +488,7 @@ async def _submit_once(page, button, evidence: Evidence, payload: PublishPayload
 
 
 async def publish(payload: PublishPayload, ctx: ProviderContext) -> ProviderResult:
+    payload = project_payload(payload)
     mutated = False
     original_emit = ctx.emit
 

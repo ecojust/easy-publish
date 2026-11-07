@@ -135,7 +135,8 @@ def test_version_one_database_gets_additive_metadata_table(tmp_path):
         assert account["label"] == "Existing account" and account["status"] == "ready"
         assert "bilibiliCategories" not in account
         assert store.all("SELECT * FROM account_metadata") == []
-        assert store.one("PRAGMA user_version")["user_version"] == 2
+        assert store.one("PRAGMA user_version")["user_version"] == 3
+        assert account["defaultSelected"] is True
     finally:
         store.close()
 
@@ -167,11 +168,9 @@ def test_preflight_uses_each_selected_accounts_current_categories(bili_api, tmp_
     ({"tags": ["a", " a "]}, "重复"),
     ({"platformOptions": {"bilibili": {"copyright": "3", "tid": "171"}}}, "创作类型"),
     ({"platformOptions": {"bilibili": {"copyright": "1", "tid": "9999"}}}, "分区"),
-    ({"platformOptions": {"bilibili": {"copyright": "1", "tid": "171", "source": "https://example.test/video"}}}, "清空"),
     ({"platformOptions": {"bilibili": {"copyright": "2", "tid": "171"}}}, "链接"),
     ({"platformOptions": {"bilibili": {"copyright": "2", "tid": "171", "source": "http://[invalid"}}}, "链接"),
     ({"platformOptions": {"bilibili": {"copyright": "2", "tid": "171", "source": "https://name:password@example.test/video"}}}, "链接"),
-    ({"platformOptions": {"bilibili": {"copyright": "1", "tid": "171", "silentOption": "1"}}}, "选项无效"),
 ])
 def test_invalid_video_metadata_is_rejected_before_queue(bili_api, tmp_path, changes, expected):
     client, runtime, _ = bili_api

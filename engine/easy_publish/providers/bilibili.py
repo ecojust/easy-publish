@@ -21,6 +21,7 @@ import httpx
 from PIL import Image, ImageOps
 
 from ..browser import browser_launch_options
+from ..target_projection import project_payload
 from .base import ProviderContext, ProviderResult, PublishPayload
 
 NAV = "https://api.bilibili.com/x/web-interface/nav"
@@ -249,6 +250,7 @@ async def check(payload: PublishPayload, ctx: ProviderContext) -> ProviderResult
 
 
 def _validate(payload: PublishPayload) -> str | None:
+    payload = project_payload(payload)
     if payload.kind != "video" or payload.mode != "publish":
         return "哔哩哔哩当前支持视频投稿，请选择视频及正式提交"
     if not payload.title.strip() or len(payload.title) > 80:
@@ -261,16 +263,12 @@ def _validate(payload: PublishPayload) -> str | None:
         return "哔哩哔哩每个标签需要 1–20 个字符，不能包含逗号或换行"
     if len(set(tag.strip() for tag in payload.tags)) != len(payload.tags):
         return "哔哩哔哩标签不能重复"
-    if set(payload.options) - {"copyright", "tid", "source"}:
-        return "哔哩哔哩包含未支持的投稿选项，请更新稿件设置后重试"
     copyright = payload.options.get("copyright")
     if copyright not in {"1", "2"}:
         return "请选择哔哩哔哩稿件类型：自制或转载"
     source = payload.options.get("source", "")
     if not isinstance(source, str) or len(source) > 200 or (copyright == "2" and not source.strip()):
         return "转载视频必须填写来源，最多 200 个字符"
-    if copyright == "1" and source:
-        return "自制视频无需转载来源，请清空来源或改选转载"
     if copyright == "2":
         try:
             origin = urlsplit(source)
@@ -406,6 +404,7 @@ async def _cover(client: httpx.AsyncClient, content: bytes | None, csrf: str) ->
 
 
 async def publish(payload: PublishPayload, ctx: ProviderContext) -> ProviderResult:
+    payload = project_payload(payload)
     mutating = False
     try:
         problem = _validate(payload)

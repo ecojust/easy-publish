@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import copy
 import importlib.util
+import os
 from pathlib import Path
 import stat
 import subprocess
@@ -19,6 +20,17 @@ SOURCE = "a" * 40
 HEAD = "b" * 40
 RUN = 123
 REPO = "owner/repository"
+
+
+class FakeClock:
+    def __init__(self):
+        self.now = 0
+
+    def monotonic(self):
+        return self.now
+
+    def sleep(self, seconds):
+        self.now += seconds
 
 
 def run_fixture():
@@ -130,6 +142,94 @@ class ReleaseGuards(unittest.TestCase):
             self.assertTrue(api.call_args.kwargs["collection"])
         with patch.object(release, "api", return_value=[]):
             self.assertEqual(release.find_release(REPO, "v0.1.3"), {})
+
+    def test_new_draft_visibility_retries_then_checks_provenance(self):
+        marker = release.provenance("v0.1.3", RUN, SOURCE, HEAD)
+        draft = {"id": 42, "draft": True, "tag_name": "v0.1.3", "body": marker}
+        clock = FakeClock()
+        with patch.object(release.time, "monotonic", clock.monotonic), \
+                patch.object(release.time, "sleep", clock.sleep), \
+                patch.object(release, "find_release", side_effect=[{}, {}, draft]) as find, \
+                patch.object(release, "command") as command:
+            self.assertEqual(release.wait_for_created_draft(REPO, "v0.1.3", marker), draft)
+        self.assertEqual(find.call_count, 3)
+        self.assertEqual(clock.now, 4)
+        self.assertEqual([call.kwargs["timeout"] for call in find.call_args_list], [20, 18, 16])
+        command.assert_not_called()
+
+    def test_new_draft_visibility_timeout_never_uploads_or_recreates(self):
+        clock = FakeClock()
+        with patch.dict(os.environ, {"GITHUB_REPOSITORY": REPO}), \
+                patch.object(release, "verify_checkout", return_value=("0.1.3", HEAD)), \
+                patch.object(release, "api", side_effect=[run_fixture(), jobs_fixture(), artifacts_fixture()]), \
+                patch.object(release, "find_release", return_value={}), \
+                patch.object(release.time, "monotonic", clock.monotonic), \
+                patch.object(release.time, "sleep", clock.sleep), \
+                patch.object(release, "download", side_effect=lambda path, target: target.write_bytes(b"fixture archive")), \
+                patch.object(release, "unpack_installer", side_effect=lambda archive, artifact, target, suffix: target.write_bytes(b"fixture installer")), \
+                patch.object(release, "command", return_value="") as command:
+            with self.assertRaisesRegex(release.ReleaseError, "newly created draft release before the deadline"):
+                release.publish("v0.1.3", RUN, SOURCE)
+        self.assertEqual(clock.now, release.DRAFT_VISIBILITY_SECONDS)
+        self.assertLessEqual(clock.now, 30)
+        command.assert_called_once()
+        self.assertEqual(command.call_args.args[0][:4], ["gh", "release", "create", "v0.1.3"])
+        self.assertIn("--draft", command.call_args.args[0])
+
+    def test_existing_published_release_is_rejected_without_retry_or_mutation(self):
+        marker = release.provenance("v0.1.3", RUN, SOURCE, HEAD)
+        published = {"id": 42, "draft": False, "tag_name": "v0.1.3", "body": marker}
+        with patch.dict(os.environ, {"GITHUB_REPOSITORY": REPO}), \
+                patch.object(release, "verify_checkout", return_value=("0.1.3", HEAD)), \
+                patch.object(release, "api", side_effect=[run_fixture(), jobs_fixture(), artifacts_fixture()]), \
+                patch.object(release, "find_release", return_value=published) as find, \
+                patch.object(release, "wait_for_created_draft") as wait, \
+                patch.object(release, "download") as download, \
+                patch.object(release, "command") as command:
+            with self.assertRaisesRegex(release.ReleaseError, "Refusing to overwrite"):
+                release.publish("v0.1.3", RUN, SOURCE)
+        find.assert_called_once_with(REPO, "v0.1.3")
+        wait.assert_not_called()
+        download.assert_not_called()
+        command.assert_not_called()
+
+    def test_visibility_retry_stops_on_foreign_or_published_draft_and_api_errors(self):
+        marker = release.provenance("v0.1.3", RUN, SOURCE, HEAD)
+        own = {"id": 42, "draft": True, "tag_name": "v0.1.3", "body": marker}
+        for result in ({**own, "draft": False}, {**own, "body": "foreign draft"},
+                       release.ReleaseError("API failure")):
+            with self.subTest(result=result), \
+                    patch.object(release, "find_release", side_effect=[result]) as find, \
+                    patch.object(release.time, "sleep") as sleep, \
+                    patch.object(release, "command") as command:
+                with self.assertRaises(release.ReleaseError):
+                    release.wait_for_created_draft(REPO, "v0.1.3", marker)
+                self.assertEqual(find.call_count, 1)
+                sleep.assert_not_called()
+                command.assert_not_called()
+
+    def test_listing_pagination_uses_remaining_deadline_for_api_requests(self):
+        clock = FakeClock()
+        earlier = [{"tag_name": f"v0.0.{index}", "id": index} for index in range(100)]
+
+        def api_page(path, **options):
+            if path.endswith("&page=1"):
+                clock.now += 19
+                return earlier
+            return []
+
+        with patch.object(release.time, "monotonic", clock.monotonic), \
+                patch.object(release, "api", side_effect=api_page) as api:
+            self.assertEqual(release.find_release(REPO, "v0.1.3", timeout=20), {})
+        self.assertEqual([call.kwargs["timeout"] for call in api.call_args_list], [20, 1])
+
+    def test_api_timeout_is_reported_without_command_output(self):
+        failure = subprocess.TimeoutExpired(["gh", "api"], 2, output="SECRET signed URL")
+        with patch.object(release.subprocess, "run", side_effect=failure) as run:
+            with self.assertRaisesRegex(release.ReleaseError, "timed out") as result:
+                release.api("repos/example/repo", timeout=2)
+        self.assertEqual(run.call_args.kwargs["timeout"], 2)
+        self.assertNotIn("SECRET", str(result.exception))
 
     def test_complete_uploaded_set_and_hashes_are_required_before_publish(self):
         with tempfile.TemporaryDirectory() as directory:

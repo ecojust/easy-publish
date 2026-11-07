@@ -9,6 +9,7 @@ from urllib.parse import urlsplit
 
 from easy_publish.catalog import BY_ID, PLATFORMS, bilibili_categories
 from easy_publish.content import ContentInput, image_sources, render_article
+from easy_publish.target_projection import project_content
 from easy_publish.store import Store, dump, now, uid
 from easy_publish.vault import VaultError
 
@@ -30,6 +31,7 @@ class Service:
         self.store = Store(data_dir)
         self.wake = asyncio.Event()
         self.jobs = {}
+        self.account_cancellations = {}
         self.queue_task = None
         self.closing = False
 
@@ -61,9 +63,10 @@ class Service:
         self.closing = True
         await self.runtime.shutdown()
         for task in [self.queue_task, *self.jobs.values()]:
-            if task:
+            if task and not task.cancelling():
                 task.cancel()
         await asyncio.gather(*(t for t in [self.queue_task, *self.jobs.values()] if t), return_exceptions=True)
+        await asyncio.gather(*list(self.account_cancellations.values()), return_exceptions=True)
         self.store.recover()
         self.store.close()
 
@@ -110,7 +113,7 @@ class Service:
         return self.store.content(self.content_row(identifier))
 
     def busy_account(self, identifier):
-        return self.store.one("SELECT id FROM tasks WHERE account_id=? AND status IN ('queued','running','submitting')", (identifier,)) or identifier in self.jobs
+        return self.store.one("SELECT id FROM tasks WHERE account_id=? AND status IN ('queued','running','submitting')", (identifier,)) or identifier in self.jobs or identifier in self.account_cancellations
 
     def add_account(self, platform_id, label, credentials):
         platform = BY_ID.get(platform_id)
@@ -132,6 +135,15 @@ class Service:
                            (identifier, platform_id, label.strip(), "login_required", "请连接账号", now(), int(platform["auth"] == "wechat_api")))
         return self.store.account(self.account_row(identifier))
 
+    def set_account_preferences(self, identifier, default_selected):
+        account = self.account_row(identifier)
+        if type(default_selected) is not bool:
+            raise Problem("默认选择设置必须为开或关")
+        self.store.execute("INSERT INTO account_preferences(account_id,default_selected) VALUES (?,?) "
+                           "ON CONFLICT(account_id) DO UPDATE SET default_selected=excluded.default_selected",
+                           (identifier, int(default_selected)))
+        return self.store.account(account)
+
     def delete_account(self, identifier):
         self.account_row(identifier)
         if self.busy_account(identifier):
@@ -139,6 +151,7 @@ class Service:
         self.runtime.vault.delete(identifier)
         with self.store.transaction() as db:
             db.execute("DELETE FROM account_metadata WHERE account_id=?", (identifier,))
+            db.execute("DELETE FROM account_preferences WHERE account_id=?", (identifier,))
             db.execute("DELETE FROM accounts WHERE id=?", (identifier,))
 
     async def connect_account(self, identifier, operation):
@@ -160,6 +173,37 @@ class Service:
             db.execute("DELETE FROM account_metadata WHERE account_id=?", (identifier,))
             db.execute("UPDATE accounts SET status='logging_in',message='正在连接账号',updated=? WHERE id=?", (now(), identifier))
         self.jobs[identifier] = asyncio.create_task(self._connect(account, operation))
+
+    async def cancel_account(self, identifier):
+        self.account_row(identifier)
+        cancellation = self.account_cancellations.get(identifier)
+        if cancellation is None:
+            job = self.jobs.get(identifier)
+            if job is None or job.done():
+                return
+            cancellation = asyncio.create_task(self._cancel_account_job(identifier, job))
+            self.account_cancellations[identifier] = cancellation
+        # A disconnected request or a repeated click must not interrupt worker cleanup.
+        await asyncio.shield(cancellation)
+
+    async def _cancel_account_job(self, identifier, job):
+        try:
+            # The worker may have completed before this coroutine got its first turn.
+            if job.done():
+                return
+            if not job.cancelling():
+                job.cancel()
+            # Runtime.run owns the worker process group and deletes its workspace
+            # in finally. Retain account ownership until that cleanup has finished.
+            await asyncio.gather(job, return_exceptions=True)
+            with self.store.transaction() as db:
+                db.execute("DELETE FROM account_metadata WHERE account_id=?", (identifier,))
+                db.execute("UPDATE accounts SET status='login_required',message='连接已取消',updated=? WHERE id=?", (now(), identifier))
+        finally:
+            # A task cancelled before its first turn never enters _connect's finally.
+            if self.jobs.get(identifier) is job:
+                self.jobs.pop(identifier, None)
+            self.account_cancellations.pop(identifier, None)
 
     async def _connect(self, account, operation):
         identifier = account["id"]
@@ -198,19 +242,7 @@ class Service:
             common.append("请填写文章正文")
         if content["kind"] == "video" and not content["videoAssetId"]:
             common.append("请导入视频")
-        ids = [(content.get("videoAssetId"), "video"), (content.get("coverAssetId"), "image")]
-        ids += [(i, "image") for i in content["imageAssetIds"]]
-        if content["kind"] == "article":
-            for source in image_sources(render_article(content["body"])):
-                if not source.startswith("easy-asset://"):
-                    common.append("正文图片需导入素材库后插入，不支持外部图片地址")
-                else:
-                    ids.append((source.removeprefix("easy-asset://"), "image"))
-        for identifier, kind in ids:
-            if identifier:
-                asset = self.store.one("SELECT * FROM assets WHERE id=?", (identifier,))
-                if not asset or asset["kind"] != kind or not Path(asset["path"]).is_file():
-                    common.append("引用的素材已失效，请重新导入")
+        shared_content = content
         for identifier in account_ids:
             account = self.store.one("SELECT * FROM accounts WHERE id=?", (identifier,))
             errors, warnings = list(dict.fromkeys(common)), []
@@ -218,6 +250,20 @@ class Service:
                 errors.append("账号已被移除")
             else:
                 platform = BY_ID[account["platform"]]
+                content = project_content(shared_content, platform["id"])
+                ids = [(content.get("videoAssetId"), "video"), (content.get("coverAssetId"), "image")]
+                ids += [(i, "image") for i in content["imageAssetIds"]]
+                if content["kind"] == "article":
+                    for source in image_sources(render_article(content["body"])):
+                        if not source.startswith("easy-asset://"):
+                            errors.append("正文图片需导入素材库后插入，不支持外部图片地址")
+                        else:
+                            ids.append((source.removeprefix("easy-asset://"), "image"))
+                for asset_id, kind in ids:
+                    if asset_id:
+                        asset = self.store.one("SELECT * FROM assets WHERE id=?", (asset_id,))
+                        if not asset or asset["kind"] != kind or not Path(asset["path"]).is_file():
+                            errors.append("引用的素材已失效，请重新导入")
                 prior = self.store.publication_states(content.get("id", "")).get(platform["id"])
                 if prior == "unknown":
                     warnings.append("此稿件在该平台有结果不明的提交，请先核对平台，避免重复发布")
@@ -246,8 +292,6 @@ class Service:
                     if not content["coverAssetId"]:
                         errors.append("公众号文章需要封面图片")
                     warnings.append("公众号需要对应接口权限及 IP 白名单；正式发布不等于向粉丝群发")
-                if platform["id"] == "douyin" and content["coverAssetId"]:
-                    errors.append("抖音暂不支持指定封面，请移除封面或取消此账号")
                 if platform["id"] == "channels" and len(content["title"]) < 7:
                     errors.append("视频号短标题需为 7–15 字")
                 if platform["id"] == "xiaohongshu" and len(content["tags"]) > 10:
@@ -256,8 +300,6 @@ class Service:
                 if platform["id"] == "kuaishou":
                     from .providers.kuaishou import metadata_errors
                     errors.extend(metadata_errors(content["title"], content["description"], content["tags"]))
-                    if options:
-                        errors.append("快手平台选项无效")
                     warnings.append("快手会将标题、描述与话题合并为作品描述；提交后仍需平台审核")
                 for field in platform["fields"]:
                     value = options.get(field["key"], "")
@@ -268,8 +310,6 @@ class Service:
                     elif value and field.get("dynamicChoices") == "bilibiliCategories" and value not in {c["value"] for c in self.store.account_categories(identifier)}:
                         errors.append("视频分区不在此账号的可用分区中，请重新验证账号并选择分区")
                 if platform["id"] == "bilibili":
-                    if set(options) - {"copyright", "tid", "source"}:
-                        errors.append("哔哩哔哩平台选项无效")
                     if len(content["description"]) > 2000:
                         errors.append("哔哩哔哩简介最多 2000 字")
                     tags = content["tags"]
@@ -288,8 +328,6 @@ class Service:
                         valid_source = False
                     if options.get("copyright") == "2" and not valid_source:
                         errors.append("转载视频需要填写有效的原始视频链接")
-                    elif options.get("copyright") == "1" and source:
-                        errors.append("原创视频请清空转载来源")
                     if content["coverAssetId"]:
                         cover = self.store.one("SELECT * FROM assets WHERE id=?", (content["coverAssetId"],))
                         if cover and cover["size"] > 5 * 1024**2:
@@ -304,8 +342,6 @@ class Service:
                         valid_url = False
                     if options.get("source") == "转载" and not valid_url:
                         errors.append("转载文章需要填写有效的原文链接")
-                    elif options.get("source") != "转载" and url:
-                        errors.append("非转载文章请清空原文链接")
                 if platform["auth"] == "browser":
                     warnings.append("发布时可能需要在平台浏览器完成验证；平台页面变化可能影响自动化")
             targets.append({"accountId": identifier, "errors": errors, "warnings": warnings})
@@ -334,6 +370,7 @@ class Service:
         return self.store.batch(self.store.one("SELECT * FROM batches WHERE id=?", (identifier,)))
 
     def payload(self, content, task, mode):
+        content = project_content(content, task["platform"])
         def asset_path(identifier):
             return self.asset_row(identifier)["path"] if identifier else None
         images = set(content["imageAssetIds"])

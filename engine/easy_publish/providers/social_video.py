@@ -9,11 +9,13 @@ from __future__ import annotations
 import asyncio
 from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
+import json
 from pathlib import Path
 import re
-from urllib.parse import urlsplit
+from urllib.parse import urljoin, urlsplit
 
 from ..browser import browser_launch_options
+from ..target_projection import project_payload
 from .base import ProviderContext, ProviderResult, PublishPayload
 
 
@@ -38,10 +40,27 @@ LOGIN_SECONDS = 10 * 60
 CONFIRM_SECONDS = 60
 DOUYIN_USER_INFO = "/aweme/v1/creator/pc/user/info/"
 DOUYIN_VERIFY_SECONDS = 30
+ACCOUNT_VERIFY_SECONDS = 30
+LOGIN_SETTLE_SECONDS = 2
+SESSION_INVALID_SETTLE_SECONDS = 2
+LOGIN_URLS = {
+    "douyin": "https://creator.douyin.com/",
+    "xiaohongshu": "https://creator.xiaohongshu.com/login",
+    "channels": "https://channels.weixin.qq.com/",
+}
+ACCOUNT_URLS = {
+    "douyin": "https://creator.douyin.com/creator-micro/home",
+    "xiaohongshu": "https://creator.xiaohongshu.com/",
+    "channels": "https://channels.weixin.qq.com/platform",
+}
 
 
 class LoginPageError(Exception):
     """A fixed, non-secret message that the user can act on."""
+
+
+class SessionStorageError(LoginPageError):
+    """A valid login could not be persisted; do not trigger another scan."""
 
 
 class VideoStageError(Exception):
@@ -319,12 +338,12 @@ def _douyin_creator_page(page) -> bool:
 
 
 async def _douyin_challenge(page) -> bool:
-    for marker in ("扫码登录", "手机号登录", "二维码失效", "登录验证", "安全验证"):
-        if await _visible(page.get_by_text(marker, exact=True)):
-            return True
-    if await _visible(page.get_by_role("img", name="二维码", exact=True)):
+    markers = re.compile("^(扫码登录|手机号登录|二维码失效|登录验证|安全验证)$")
+    if await _login_visible(page.get_by_text(markers, exact=True)):
         return True
-    return await _visible(page.locator('input[placeholder*="验证码"], input[placeholder*="短信"]'))
+    if await _login_visible(page.get_by_role("img", name="二维码", exact=True)):
+        return True
+    return await _login_visible(page.locator('input[placeholder*="验证码"], input[placeholder*="短信"]'))
 
 
 async def _douyin_account_ready(page) -> bool:
@@ -358,24 +377,40 @@ async def _douyin_account_ready(page) -> bool:
                         method: 'GET', credentials: 'include', redirect: 'error',
                         cache: 'no-store', signal: controller.signal
                     });
-                    if (!response.ok || new URL(response.url).origin !== location.origin) return false;
+                    if (response.status === 401) return false;
+                    if (!response.ok || new URL(response.url).origin !== location.origin) return null;
                     const text = await response.text();
                     if (text.length > 1024 * 1024) return false;
                     const value = JSON.parse(text);
-                    return value.status_code === 0 && (
-                        (typeof value.uid === 'string' && /^[1-9][0-9]*$/.test(value.uid)) ||
-                        (typeof value.uid === 'number' && Number.isInteger(value.uid) && value.uid > 0)
-                    );
-                } catch (_) { return false; }
+                    if (value && typeof value.status_code === 'number' && value.status_code !== 0) return false;
+                    if (!value || value.status_code !== 0 || !Object.hasOwn(value, 'uid')) return null;
+                    const hasUid = (typeof value.uid === 'string' && /^[1-9][0-9]*$/.test(value.uid)) ||
+                        (typeof value.uid === 'number' && Number.isInteger(value.uid) && value.uid > 0);
+                    return hasUid;
+                } catch (_) { return null; }
                 finally { clearTimeout(timer); }
             }""", DOUYIN_USER_INFO)
     except Exception:
-        return False
+        confirmed = None
     finally:
         page.remove_listener("framenavigated", on_navigation)
     # A response from a previous navigation/account must not confirm the page
     # that replaced it. A visible second-factor prompt still requires the user.
-    return confirmed is True and not navigated and not page.is_closed() and page.url == original_url and _douyin_creator_page(page) and not await _douyin_challenge(page)
+    if navigated or page.is_closed() or page.url != original_url or not _douyin_creator_page(page) or await _douyin_challenge(page):
+        return False
+    if confirmed is not None:
+        return confirmed is True  # An explicit unauthenticated API result vetoes fallback.
+    try:
+        # The upstream CLI verifies sessionid after login. Combine that signal
+        # with an authenticated creator control when its optional API is down.
+        cookies = await page.context.cookies(["https://creator.douyin.com/"])
+        session = any(cookie.get("name") == "sessionid" and cookie.get("value") for cookie in cookies)
+        control = (await _login_visible(page.get_by_role("button", name="发布视频", exact=True))
+                   or await _login_visible(page.get_by_role("link", name="发布视频", exact=True)))
+        return bool(session and control and page.url == original_url and not page.is_closed()
+                    and _douyin_creator_page(page) and not await _douyin_challenge(page))
+    except Exception:
+        return False
 
 
 def _platform(payload: PublishPayload) -> str:
@@ -387,15 +422,26 @@ def _unavailable() -> ProviderResult:
 
 
 @asynccontextmanager
-async def _browser_page(ctx: ProviderContext, *, load_session: bool = True):
+async def _browser_page(ctx: ProviderContext, *, load_session: bool = True, headless: bool = False, platform: str | None = None):
     # Import lazily so validation and protocol tests do not require a browser.
     from patchright.async_api import async_playwright
     async with async_playwright() as driver:
-        browser = await driver.chromium.launch(**browser_launch_options(ctx.browser_path))
+        browser = await driver.chromium.launch(**browser_launch_options(ctx.browser_path, headless=headless))
         try:
             options = {"locale": "zh-CN", "timezone_id": "Asia/Shanghai"}
             if load_session and ctx.session_path.is_file():
-                options["storage_state"] = str(ctx.session_path)
+                if platform == "xiaohongshu":
+                    # This is display metadata, not authentication. Require the
+                    # new document to populate it from its current account load,
+                    # instead of accepting a stale avatar from restored storage.
+                    state = json.loads(ctx.session_path.read_text(encoding="utf-8"))
+                    for origin in state.get("origins", []):
+                        if origin.get("origin") == "https://creator.xiaohongshu.com":
+                            origin["localStorage"] = [item for item in origin.get("localStorage", [])
+                                                      if item.get("name") not in {"USER_INFO", "USER_INFO_FOR_BIZ"}]
+                    options["storage_state"] = state
+                else:
+                    options["storage_state"] = str(ctx.session_path)
             context = await browser.new_context(**options)
             page = await context.new_page()
             page.set_default_timeout(30_000)
@@ -408,62 +454,198 @@ async def _visible(locator) -> bool:
     return bool(await locator.count() and await locator.first.is_visible())
 
 
+async def _login_visible(locator) -> bool:
+    # Hidden stale login widgets must not hide a later visible challenge.
+    count = await locator.count()
+    for index in range(min(count, 30)):
+        candidate = locator.first if count == 1 else locator.nth(index)
+        if await candidate.is_visible():
+            return True
+    return False
+
+
+def _creator_page(page, platform: str) -> bool:
+    if page.is_closed():
+        return False
+    if platform == "douyin":
+        return _douyin_creator_page(page)
+    try:
+        parsed = urlsplit(page.url)
+        if (parsed.scheme != "https" or parsed.hostname != SITES[platform].host
+                or parsed.port not in {None, 443} or parsed.username or parsed.password
+                or any(part in parsed.path.lower() for part in ("login", "signin"))):
+            return False
+        return platform == "xiaohongshu" or parsed.path == "/platform" or parsed.path.startswith("/platform/")
+    except ValueError:
+        return False
+
+
+async def _login_challenge(page, platform: str) -> bool:
+    if platform == "douyin":
+        return await _douyin_challenge(page)
+    markers = re.compile("^(扫码登录|手机号登录|二维码失效|登录验证|安全验证|管理员验证|实名验证)$")
+    if await _login_visible(page.get_by_text(markers, exact=True)):
+        return True
+    if await _login_visible(page.locator('input[placeholder*="验证码"], input[placeholder*="短信"], div[class*="login-box"], .login-qrcode-wrap, .qrcode-wrap')):
+        return True
+    for frame in page.frames:
+        if "open.weixin.qq.com/connect/qrconnect" in frame.url or "login-for-iframe" in frame.url:
+            try:
+                if await (await frame.frame_element()).is_visible():
+                    return True
+            except Exception:
+                return True
+    return False
+
+
+async def _channels_entry(page):
+    buttons = page.get_by_role("button", name="发表视频", exact=True)
+    for index in range(min(await buttons.count(), 20)):
+        button = buttons.nth(index)
+        if await button.is_visible():
+            return button
+    links = page.get_by_role("link", name="发表视频", exact=True)
+    for index in range(min(await links.count(), 20)):
+        link = links.nth(index)
+        target = urljoin(page.url, await link.get_attribute("href") or "")
+        if (await link.is_visible() and _channels_trusted_url(target)
+                and urlsplit(target).path.rstrip("/") == "/platform/post/create"):
+            return link
+    return None
+
+
+async def _read_login_evidence(page, platform: str) -> bool:
+    if platform == "douyin":
+        return await _douyin_account_ready(page)
+    if not _creator_page(page, platform) or await _login_challenge(page, platform):
+        return False
+    original_url = page.url
+    if platform == "xiaohongshu":
+        # First-party creator header + this document's freshly populated account
+        # metadata. A URL, upload widget or restored localStorage alone is not
+        # evidence of login. Account details never leave the browser context.
+        ready = await page.evaluate("""() => {
+            const visible = el => !!el && el.getClientRects().length > 0 &&
+                getComputedStyle(el).visibility !== 'hidden';
+            try {
+                const user = JSON.parse(localStorage.getItem('USER_INFO_FOR_BIZ'));
+                if (!user || typeof user.userId !== 'string' || !user.userId.trim() ||
+                    typeof user.userName !== 'string' || !user.userName.trim()) return false;
+                return Array.from(document.querySelectorAll('.user-info')).some(header =>
+                    visible(header) && Array.from(header.querySelectorAll('img.user_avatar')).some(img =>
+                        visible(img) && !!img.getAttribute('src')) &&
+                    Array.from(header.querySelectorAll('span')).some(name =>
+                        visible(name) && name.textContent.trim() === user.userName.trim()));
+            } catch (_) { return false; }
+        }""")
+    else:
+        ready = await _channels_entry(page) is not None
+        if not ready:
+            for frame in page.frames:
+                if (not frame.is_detached() and _channels_trusted_url(frame.url)
+                        and urlsplit(frame.url).path.rstrip("/") == "/micro/content/post/create"):
+                    # Authenticated editor variants need not expose the home
+                    # button. Merely having an empty editor iframe is not enough.
+                    editor = await _login_visible(frame.locator('div.input-editor[contenteditable="true"], div.input-editor [contenteditable="true"]'))
+                    actions = await _login_visible(frame.get_by_role("button", name=re.compile("^(发表|保存草稿)$")))
+                    ready = editor and actions
+                    if ready:
+                        break
+    return bool(ready and page.url == original_url and _creator_page(page, platform)
+                and not await _login_challenge(page, platform))
+
+
 async def _logged_in(page, platform: str) -> bool:
     if platform == "douyin":
         return await _douyin_account_ready(page)
-    site = SITES[platform]
-    parsed = urlsplit(page.url)
-    if parsed.hostname != site.host or any(part in parsed.path for part in ("login", "signin")):
+    if not _creator_page(page, platform):
         return False
-    for frame in page.frames:
-        if "open.weixin.qq.com/connect/qrconnect" in frame.url:
-            return False
-    if platform == "xiaohongshu":
-        if await _visible(page.locator('div[class*="login-box"]')):
-            return False
-        return bool(await page.locator(site.upload).count())
-    return await _visible(page.locator("button.weui-desktop-btn").filter(has_text="发表视频"))
+    original_url = page.url
+    navigated = False
+
+    def on_navigation(frame):
+        nonlocal navigated
+        if frame == page.main_frame:
+            navigated = True
+
+    page.on("framenavigated", on_navigation)
+    try:
+        ready = await _read_login_evidence(page, platform)
+        return bool(ready and not navigated and not page.is_closed() and page.url == original_url)
+    finally:
+        page.remove_listener("framenavigated", on_navigation)
 
 
-async def _wait_login(page, platform: str, seconds: float, ctx: ProviderContext | None = None):
+async def _wait_login(page, platform: str, seconds: float, ctx: ProviderContext | None = None, *, settle_seconds: float = 0, interactive: bool = True):
     unconfirmed_since = None
     last_message = ""
+    confirmed_page = None
+    confirmed_url = ""
+    confirmed_since = None
+    invalid_since = None
     async with asyncio.timeout(seconds):
         while True:
-            # QR/login flows can open a new creator tab. It belongs to the
-            # same isolated account context; unrelated windows are not used.
-            pages = list(reversed(page.context.pages)) if platform == "douyin" else [page]
-            pages = [candidate for candidate in pages if not candidate.is_closed()]
+            # All platforms can open a new creator tab after scanning. A stale
+            # QR tab must not hide the authenticated tab in the same context.
+            pages = [candidate for candidate in reversed(page.context.pages) if not candidate.is_closed()]
             if not pages:
                 raise LoginPageError("登录浏览器已关闭，请重新连接账号")
             creator_seen = False
             challenge_seen = False
+            ready_page = None
             for candidate in pages:
-                if platform == "douyin":
-                    if not _douyin_creator_page(candidate):
-                        continue
-                    creator_seen = True
-                    if await _douyin_challenge(candidate):
+                if not _creator_page(candidate, platform):
+                    if not interactive:
+                        parsed = urlsplit(candidate.url)
+                        if parsed.hostname == SITES[platform].host:
+                            challenge_seen = challenge_seen or any(part in parsed.path.lower() for part in ("login", "signin"))
+                            if not challenge_seen:
+                                challenge_seen = await _login_challenge(candidate, platform)
+                    continue
+                creator_seen = True
+                try:
+                    if await _logged_in(candidate, platform):
+                        ready_page = candidate
+                        break
+                    if await _login_challenge(candidate, platform):
                         challenge_seen = True
+                except Exception:
+                    if candidate.is_closed():
                         continue
-                if await _logged_in(candidate, platform):
-                    return candidate
-            if platform == "douyin":
-                message = ""
+                    # Navigation can replace the document during read-only
+                    # account checks. Reacquire instead of closing the login UI.
+                    continue
+            if ready_page:
+                invalid_since = None
+                if ready_page != confirmed_page or ready_page.url != confirmed_url:
+                    confirmed_page, confirmed_url = ready_page, ready_page.url
+                    confirmed_since = asyncio.get_running_loop().time()
+                if asyncio.get_running_loop().time() - confirmed_since >= settle_seconds:
+                    return ready_page
+                message = f"已识别{SITES[platform].label}账号，正在确认并保存登录状态"
+            else:
+                confirmed_page = confirmed_since = None
+                if not interactive and challenge_seen:
+                    invalid_since = invalid_since or asyncio.get_running_loop().time()
+                    if asyncio.get_running_loop().time() - invalid_since >= SESSION_INVALID_SETTLE_SECONDS:
+                        raise LoginPageError("应用保存的登录会话已失效，请重新连接账号")
+                else:
+                    invalid_since = None
+                message = f"请在{SITES[platform].label}登录窗口完成扫码确认及平台验证"
                 if challenge_seen:
-                    message = "请在抖音浏览器中完成扫码确认、短信或安全验证"
                     unconfirmed_since = None
                 elif creator_seen:
-                    message = "已进入抖音创作者中心，正在确认账号登录状态"
+                    message = f"已进入{SITES[platform].label}创作者中心，正在确认账号登录状态"
                     unconfirmed_since = unconfirmed_since or asyncio.get_running_loop().time()
-                    if asyncio.get_running_loop().time() - unconfirmed_since >= DOUYIN_VERIFY_SECONDS:
-                        raise LoginPageError("已进入抖音创作者中心，但账号状态接口未能确认登录；请在浏览器中检查网络及平台验证后重新连接")
+                    limit = DOUYIN_VERIFY_SECONDS if platform == "douyin" else ACCOUNT_VERIFY_SECONDS
+                    if asyncio.get_running_loop().time() - unconfirmed_since >= limit:
+                        raise LoginPageError(f"已进入{SITES[platform].label}创作者中心，但尚未取得账号登录确认；请检查网络及平台验证后重新连接")
                 else:
                     unconfirmed_since = None
-                if ctx and message and message != last_message:
-                    ctx.progress(message)
-                    last_message = message
-            await asyncio.sleep(1)
+            if ctx and message != last_message:
+                ctx.progress(message)
+                last_message = message
+            await asyncio.sleep(0.5)
 
 
 async def _douyin_upload_page(page, ctx: ProviderContext) -> None:
@@ -481,16 +663,44 @@ async def _douyin_upload_page(page, ctx: ProviderContext) -> None:
         raise LoginPageError("抖音账号已登录，但未找到视频上传入口；请检查账号投稿权限或平台页面后重试") from None
 
 
+async def _saved_session_ready(platform: str, ctx: ProviderContext) -> bool:
+    """Check only this app's saved state, quietly, before requesting another scan."""
+    async with _browser_page(ctx, headless=True, platform=platform) as (context, page):
+        await page.goto(ACCOUNT_URLS[platform], wait_until="domcontentloaded", timeout=60_000)
+        try:
+            await _wait_login(page, platform, 25, settle_seconds=LOGIN_SETTLE_SECONDS, interactive=False)
+        except (TimeoutError, LoginPageError):
+            return False
+        # Keep this outside the invalid-session catch: a failed write is a
+        # storage problem, not a reason to discard a working account login.
+        try:
+            await context.storage_state(path=str(ctx.session_path))
+        except Exception:
+            raise SessionStorageError("账号登录有效，但应用会话保存失败；请检查应用数据目录的读写权限") from None
+        return True
+
+
 async def login(payload: PublishPayload, ctx: ProviderContext) -> ProviderResult:
     platform = _platform(payload)
     if platform not in SITES:
         return _unavailable()
     site = SITES[platform]
-    ctx.progress(f"请在打开的浏览器中完成{site.label}登录及平台验证")
     try:
-        async with _browser_page(ctx, load_session=False) as (context, page):
-            await page.goto(site.url, wait_until="domcontentloaded", timeout=60_000)
-            await _wait_login(page, platform, LOGIN_SECONDS, ctx)
+        if ctx.session_path.is_file():
+            ctx.progress(f"正在检查应用已保存的{site.label}登录状态")
+            try:
+                restored = await _saved_session_ready(platform, ctx)
+            except SessionStorageError:
+                raise
+            except Exception:
+                restored = False
+            if restored:
+                return ProviderResult("ready", f"已复用应用保存的{site.label}登录会话")
+            ctx.progress(f"已保存的{site.label}会话未能确认，正在打开登录窗口")
+        ctx.progress(f"请在打开的浏览器中完成{site.label}登录及平台验证")
+        async with _browser_page(ctx, load_session=False, platform=platform) as (context, page):
+            await page.goto(LOGIN_URLS[platform], wait_until="domcontentloaded", timeout=60_000)
+            await _wait_login(page, platform, LOGIN_SECONDS, ctx, settle_seconds=LOGIN_SETTLE_SECONDS)
             ctx.progress(f"已确认{site.label}登录，正在保存加密会话")
             ctx.session_path.parent.mkdir(parents=True, exist_ok=True)
             await context.storage_state(path=str(ctx.session_path))
@@ -510,21 +720,17 @@ async def check(payload: PublishPayload, ctx: ProviderContext) -> ProviderResult
     if not ctx.session_path.is_file():
         return ProviderResult("login_required", "请先登录此账号")
     try:
-        async with _browser_page(ctx) as (context, page):
-            await page.goto(SITES[platform].url, wait_until="domcontentloaded", timeout=60_000)
-            try:
-                await _wait_login(page, platform, 25, ctx)
-            except TimeoutError:
-                return ProviderResult("login_required", "尚未确认有效登录，请重新登录并完成平台验证")
-            await context.storage_state(path=str(ctx.session_path))
-        return ProviderResult("ready", "已确认抖音账号登录有效" if platform == "douyin" else "已确认当前账号可访问发布入口")
-    except LoginPageError as exc:
+        if await _saved_session_ready(platform, ctx):
+            return ProviderResult("ready", f"已确认{SITES[platform].label}账号登录有效")
+        return ProviderResult("login_required", "尚未确认有效登录，请重新登录并完成平台验证")
+    except SessionStorageError as exc:
         return ProviderResult("needs_attention", str(exc))
     except Exception:
         return ProviderResult("needs_attention", "账号检查未完成，请检查网络或浏览器后重试")
 
 
 def _validate(payload: PublishPayload, platform: str) -> str | None:
+    payload = project_payload(payload, platform)
     if payload.kind != "video":
         return "该平台当前仅接入视频发布，图片笔记不能作为文章发布"
     if payload.mode == "draft" and platform != "channels":
@@ -539,8 +745,6 @@ def _validate(payload: PublishPayload, platform: str) -> str | None:
         return "此视频扩展名暂不支持，请使用 MP4、MOV 或其他支持的视频格式"
     if payload.cover_path and not Path(payload.cover_path).is_file():
         return "封面文件不存在，请重新导入"
-    if platform == "douyin" and payload.cover_path:
-        return "抖音自定义封面尚未接入；请取消自定义封面，或在平台手工设置"
     if platform == "xiaohongshu" and len(payload.tags) > 10:
         return "小红书最多支持 10 个话题；请减少话题后重试"
     return None
@@ -596,9 +800,12 @@ async def _prepare(page, platform: str, payload: PublishPayload, ctx: ProviderCo
     site = SITES[platform]
     frame = page
     if platform == "channels":
+        entry = await _channels_entry(page)
+        if entry is None:
+            raise VideoStageError("视频号账号已登录，但未找到发表视频入口；尚未选择视频，请检查平台页面")
         # Opening the editor may create an empty platform draft.
         ctx.submitting("正在打开视频号编辑器；中断后请先核对平台草稿和作品")
-        await page.locator("button.weui-desktop-btn").filter(has_text="发表视频").first.click()
+        await entry.click()
         frame = await _channels_wait_editor(page)
     upload = frame.locator(site.upload).first
     await upload.wait_for(state="attached", timeout=60_000)
@@ -741,6 +948,7 @@ async def _submit_once(page, button, platform: str, payload: PublishPayload, ctx
 
 
 async def publish(payload: PublishPayload, ctx: ProviderContext) -> ProviderResult:
+    payload = project_payload(payload)
     platform = _platform(payload)
     if platform not in SITES:
         return _unavailable()
@@ -760,7 +968,7 @@ async def publish(payload: PublishPayload, ctx: ProviderContext) -> ProviderResu
 
     guarded_ctx = ProviderContext(ctx.session_path, ctx.workspace, ctx.browser_path, track)
     try:
-        async with _browser_page(ctx) as (context, page):
+        async with _browser_page(ctx, platform=platform) as (context, page):
             await page.goto(SITES[platform].url, wait_until="domcontentloaded", timeout=60_000)
             try:
                 page = await _wait_login(page, platform, 25, ctx)

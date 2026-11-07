@@ -10,9 +10,10 @@ from uuid import UUID
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, StrictBool
 
 from easy_publish.content import ContentInput, import_asset, preview_asset, render_article
+from easy_publish.article_templates import ArticleTemplateId
 from easy_publish.catalog import BY_ID
 from easy_publish.service import Problem, Service
 
@@ -25,6 +26,10 @@ class AccountInput(Input):
     platformId: str = Field(max_length=40)
     label: str = Field(max_length=80)
     credentials: dict[str, str] | None = None
+
+
+class AccountPreferencesInput(Input):
+    defaultSelected: StrictBool
 
 
 class AssetInput(Input):
@@ -44,7 +49,7 @@ class BatchInput(Selection):
 
 class ArticlePreviewInput(Input):
     body: str = Field(default="", max_length=500_000)
-    articleTemplateId: Literal["clean", "editorial", "journal", "tech"] = "clean"
+    articleTemplateId: ArticleTemplateId = "clean"
     platformId: str | None = Field(default=None, max_length=40)
 
 
@@ -163,6 +168,10 @@ def create_app(data_dir: Path, token: str, runtime=None, *, mcp_token: str | Non
             raise Problem("应用凭据格式不正确")
         return service.add_account(value.platformId, value.label, value.credentials)
 
+    @app.put("/api/accounts/{identifier}/preferences")
+    async def account_preferences(identifier: str, value: AccountPreferencesInput):
+        return service.set_account_preferences(identifier, value.defaultSelected)
+
     @app.delete("/api/accounts/{identifier}")
     async def delete_account(identifier: str):
         service.delete_account(identifier)
@@ -176,6 +185,11 @@ def create_app(data_dir: Path, token: str, runtime=None, *, mcp_token: str | Non
     @app.post("/api/accounts/{identifier}/check")
     async def check(identifier: str):
         await service.connect_account(identifier, "check")
+        return {"ok": True}
+
+    @app.post("/api/accounts/{identifier}/cancel")
+    async def cancel_account(identifier: str):
+        await service.cancel_account(identifier)
         return {"ok": True}
 
     @app.post("/api/preflight")

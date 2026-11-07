@@ -60,7 +60,7 @@ class Page:
         self.listeners.remove(listener)
 
     def get_by_text(self, text, **kwargs):
-        return Locator(text == self.login_marker)
+        return Locator(bool(text.search(self.login_marker or "")) if hasattr(text, "search") else text == self.login_marker)
 
     def get_by_role(self, role, **kwargs):
         return Locator(self.qrcode)
@@ -181,7 +181,7 @@ async def test_closed_login_browser_exits_without_ten_minute_wait(account):
 async def test_unconfirmed_home_has_bounded_actionable_error(account, monkeypatch):
     ctx, _, _ = account
     monkeypatch.setattr(video, "DOUYIN_VERIFY_SECONDS", 0)
-    with pytest.raises(video.LoginPageError, match="账号状态接口未能确认"):
+    with pytest.raises(video.LoginPageError, match="尚未取得账号登录确认"):
         await video._wait_login(Page(authenticated=False), "douyin", 600, ctx)
 
 
@@ -269,14 +269,14 @@ async def test_late_login_error_after_fence_stays_unknown(account, monkeypatch):
     ({"status_code": 0, "uid": 123}, True),
     ({"status_code": 8, "status_msg": "用户未登录", "uid": "123"}, False),
     ({"status_code": 4, "uid": "123"}, False),
-    ({"status_code": "0", "uid": "123"}, False),
-    ({"status_code": 0}, False),
+    ({"status_code": "0", "uid": "123"}, None),
+    ({"status_code": 0}, None),
     ({"status_code": 0, "uid": "0"}, False),
     ({"status_code": 0, "uid": True}, False),
     ({"status_code": 0, "uid": 1.5}, False),
     ({"status_code": 0, "uid": "not-an-identity"}, False),
     ({"status_code": 0, "uid": [123]}, False),
-    (None, False),
+    (None, None),
 ])
 async def test_browser_probe_executes_verified_status_and_uid_contract(body, expected):
     # Execute the exact browser function against a fake fetch in Patchright's
