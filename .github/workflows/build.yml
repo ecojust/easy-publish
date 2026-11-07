@@ -95,10 +95,11 @@ jobs:
           npm ci
           python -m pip install -r engine/requirements-dev.txt pyinstaller==6.22.3 pytest==8.4.2
       - name: Check frontend and engine
+        timeout-minutes: 6
         run: |
           npm run check
           npm run build
-          python -m pytest engine/tests -q
+          python -m pytest engine/tests -vv -o faulthandler_timeout=45
         env:
           PYTHONPATH: engine
       - name: Verify pinned OpenCode preparation guards
