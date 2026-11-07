@@ -3,7 +3,7 @@
   <h1>Easy Publish</h1>
 </div>
 
-Easy Publish 是把一篇文章或一个视频发布到多个平台的本地桌面工作台。文章与视频分开管理，账号统一配置；纯文本通过 OpenCode 润色，用 Wenyan 模板预览后发布。也可通过 MCP，让 Agent 使用已连接的账号发布内容并查询结果。
+Easy Publish 是把一篇文章或一个视频发布到多个平台的本地桌面工作台。文章与视频分开管理，账号统一配置；直接编写 Markdown，用 Wenyan CLI 生成模板预览后发布。也可通过 MCP，让 Agent 使用已连接的账号发布内容并查询结果。
 
 [![GitHub release](https://img.shields.io/github/v/release/ecojust/easy-publish?style=flat-square&label=release&color=0f766e&sort=date)](https://github.com/ecojust/easy-publish/releases/latest)
 [![GitHub Release 总下载量](https://img.shields.io/github/downloads/ecojust/easy-publish/total?style=flat-square&label=downloads&color=16a34a)](https://github.com/ecojust/easy-publish/releases)
@@ -14,13 +14,13 @@ Easy Publish 是把一篇文章或一个视频发布到多个平台的本地桌�
 [![MCP tools](https://img.shields.io/badge/MCP-12%20tools-5c4ee5?style=flat-square)](docs/mcp.md)
 [![MIT license](https://img.shields.io/badge/license-MIT-f4c430?style=flat-square)](LICENSE)
 
-[下载 Easy Publish 0.1.8](https://github.com/ecojust/easy-publish/releases/tag/v0.1.8) · macOS 13.5+（Apple Silicon / Intel）/ Windows 10+ x64
+[下载 Easy Publish 0.1.9](https://github.com/ecojust/easy-publish/releases/tag/v0.1.9) · macOS 13.5+（Apple Silicon / Intel）/ Windows 10+ x64
 
 [使用指南](#使用流程) · [文章模板](docs/article-templates.md) · [MCP / Agent 接入](docs/mcp.md) · [反馈问题](https://github.com/ecojust/easy-publish/issues)
 
 ![Easy Publish 当前版本的文章工作台，使用示例稿件与模拟账号数据](docs/previews/workspace-zh.png)
 
-安装包内置发布引擎、OpenCode 与 Wenyan，无需另装 Python、Node.js 或开发工具。平台流程使用隔离测试验证；网站改版、账号权限与人工验证可能影响实际操作，具体要求见下表。
+安装包内置发布引擎与 Wenyan CLI，无需另装 Python、Node.js 或开发工具。平台流程使用隔离测试验证；网站改版、账号权限与人工验证可能影响实际操作，具体要求见下表。
 
 ## 平台能力
 
@@ -42,13 +42,13 @@ Easy Publish 是把一篇文章或一个视频发布到多个平台的本地桌�
 
 ## 安装与下载
 
-从 [Release 页面](https://github.com/ecojust/easy-publish/releases/tag/v0.1.8) 下载对应安装包：
+从 [Release 页面](https://github.com/ecojust/easy-publish/releases/tag/v0.1.9) 下载对应安装包：
 
 | 系统 | 下载 |
 | --- | --- |
-| macOS Apple Silicon（M1–M5） | [ARM DMG](https://github.com/ecojust/easy-publish/releases/download/v0.1.8/Easy-Publish_0.1.8_macos-arm64.dmg) |
-| macOS Intel | [Intel DMG](https://github.com/ecojust/easy-publish/releases/download/v0.1.8/Easy-Publish_0.1.8_macos-x64.dmg) |
-| Windows x64 | [安装程序](https://github.com/ecojust/easy-publish/releases/download/v0.1.8/Easy-Publish_0.1.8_windows-x64-setup.exe) |
+| macOS Apple Silicon（M1–M5） | [ARM DMG](https://github.com/ecojust/easy-publish/releases/download/v0.1.9/Easy-Publish_0.1.9_macos-arm64.dmg) |
+| macOS Intel | [Intel DMG](https://github.com/ecojust/easy-publish/releases/download/v0.1.9/Easy-Publish_0.1.9_macos-x64.dmg) |
+| Windows x64 | [安装程序](https://github.com/ecojust/easy-publish/releases/download/v0.1.9/Easy-Publish_0.1.9_windows-x64-setup.exe) |
 
 升级前完全退出旧版。macOS 打开 DMG，将应用拖入“应用程序”；Windows 运行安装程序。Release 同时提供 `SHA256SUMS.txt`。后续开发构建仍可从成功的 [Actions 运行](https://github.com/ecojust/easy-publish/actions/workflows/build.yml) 下载 artifact 并解压 ZIP，Actions 下载通常需要登录 GitHub。
 
@@ -60,7 +60,7 @@ macOS 请使用 0.1.1 或之后的构建。0.1.0 在部分 Mac 上会因启动�
 
 1. 打开“设置”，查看发布浏览器和应用账号存储状态。应用会先查找已安装的 Chrome / Edge / Chromium；没有可用浏览器时，点击“下载并准备浏览器”。下载需要网络，公众号官方 API 操作本身不依赖浏览器。
 2. 在“账号管理”添加账号并连接，通过“发布时默认选中”开关设置常用账号；公众号在这里选择自己的文章模板；B 站在“视频发布设置”中填写创作类型、分区及转载来源。抖音、小红书和视频号优先检查应用已保存的会话，需要重新登录时才打开独立浏览器；公众号填写开发者凭据后检查连接。连接期间可点击“取消连接”，等待浏览器清理后重试。
-3. 文章页上方填写标题、作者、封面等资料，在一个正文输入框中输入纯文本。点击“润色生成”后，内置 OpenCode 润色原文并生成 Markdown；通过右上角“预览”按钮打开弹窗，按账号查看最终平台效果。原文独立保留，修改正文后需要重新整理；已经写好的 Markdown 稿件可直接预览。视频页仍支持导入 MP4、MOV、M4V、WebM，填写标题、描述、话题及封面。
+3. 文章页上方填写标题、作者、封面等资料，在正文输入框直接编写 Markdown，也可导入 Markdown 文件。点击右上角“预览”，内置 Wenyan CLI 在本地生成最终排版，按账号查看平台效果。视频页支持导入 MP4、MOV、M4V、WebM，填写标题、描述、话题及封面。
 4. 文章和视频自动使用账号管理中已开启且连接就绪的兼容账号，无需在发布页再次勾选。选择“发布内容”或“平台草稿”，检查预览及内容要求后创建任务。文章的来源等字段在文章页填写，视频的平台设置统一从账号管理读取。
 5. 在“发布任务”查看每个账号的进度与结果。任务保存创建时的内容快照，后续修改本地稿件不会改变已创建的任务。
 
@@ -92,11 +92,11 @@ macOS 请使用 0.1.1 或之后的构建。0.1.0 在部分 Mac 上会因启动�
 
 每个公众号在账号管理中选择自己的模板，同一篇文章可以为不同账号生成不同版式。创建发布任务时冻结模板，之后修改账号设置不会改变已排队任务：
 
-内置 Wenyan 官方八款模板：默认经典、橙心、彩虹、青金石、思源、玉米、紫色、物理猫。排版使用与 oDesk 中 Wenyan CLI 相同的官方渲染核心，不再用手写样式近似这些主题；原六款模板仍作为兼容选项保留。账号管理展示实际模板缩略图，切换只重新排版，不调用模型。详情见 [文章模板说明](docs/article-templates.md)。
+内置 Wenyan 官方八款模板：默认经典、橙心、彩虹、青金石、思源、玉米、紫色、物理猫。排版使用内置 Wenyan CLI；原六款模板仍作为兼容选项保留。账号管理展示实际模板缩略图，切换后重新生成排版。详情见 [文章模板说明](docs/article-templates.md)。
 
-文章预览独立于发布账号筛选，没有账号也可以查看默认排版；已发布过或关闭自动发布的账号仍可预览。旧 Markdown 仍可直接预览，或复制为新的纯文本润色草稿，保留原稿。
+文章预览独立于发布账号筛选，没有账号也可以查看默认排版；已发布过或关闭自动发布的账号仍可预览。Markdown 编辑后可直接预览，关闭弹窗继续编辑。
 
-整理文章使用安装包内的 OpenCode 和官方免密钥免费模型入口，需要联网。只有点击“润色生成”才会把原文发送到该模型；保存、预览及切换模板不会发送。免费服务可能限流或暂时不可用，应用保留原文并提示重试，不自动改用付费模型。整理与发布是独立操作，生成结果应通过右上角“预览”按钮打开弹窗核对。设置页可检查内置整理服务状态，无需登录个人 OpenCode 或提供密钥。
+文章编辑与预览无需模型或 API 密钥。Wenyan CLI 在本地渲染 Markdown，不把正文发送给模型服务。升级后，旧版已成功生成的 Markdown 保留；尚未生成或原文已修改的稿件以最新原文迁入编辑器，旧原文可展开查看。历史发布任务继续使用创建时的内容快照。
 
 发布前会根据目标编辑器转换 HTML。公众号与大鱼号保留其支持的内联样式；知乎、雪球使用平台原生排版，不能保证保留全部颜色和字体。不支持的表格或代码结构会转换为可读内容。选择目标平台预览可查看对应效果和说明，正文图片仍需先导入本地素材。
 
@@ -118,9 +118,9 @@ MCP 配置不含账号凭据或会话，发布工具通过同一个桌面队列�
 
 ## 哔哩哔哩视频投稿
 
-在账号管理中添加哔哩哔哩账号，通过打开的浏览器完成登录。应用读取该账号创作中心实际可用的分区；多个 B 站账号同时投稿时，编辑器只提供共同支持的分区。若分区为空或权限变化，请重新检查账号连接。
+在账号管理中添加哔哩哔哩账号，通过打开的浏览器完成登录。应用读取该账号创作中心实际可用的分区；各账号在“视频发布设置”中选择自己的分区。若分区为空或权限变化，请重新检查账号连接。
 
-在视频工作台选择账号、分区及“原创／转载”。转载填写原始视频链接，原创会忽略来源字段；标题最多 80 字，简介最多 2000 字，标签为 1–12 个、每个最多 20 字。可选 JPEG / PNG 封面不超过 5 MiB，不指定封面时由平台处理。
+在账号管理的“视频发布设置”中选择分区及“原创／转载”。转载填写原始视频链接，原创会忽略来源字段；标题最多 80 字，简介最多 2000 字，标签为 1–12 个、每个最多 20 字。可选 JPEG / PNG 封面不超过 5 MiB，不指定封面时由平台处理。
 
 本版本支持普通视频单稿件投稿，不提供 B 站平台草稿、合集或定时发布。取得稿件回执后记为“已提交”，最终审核和公开状态在创作中心核对。上传或提交后中断会保留“结果未知”，请先检查平台，避免重复投稿。无需安装 biliup 命令行工具。
 
@@ -144,6 +144,7 @@ macOS：
 python3.12 -m venv .venv
 .venv/bin/python -m pip install -r engine/requirements-dev.txt
 npm ci
+npm run prepare:wenyan
 npm run desktop:dev
 ```
 
@@ -153,6 +154,7 @@ Windows PowerShell：
 py -3.12 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r engine/requirements-dev.txt
 npm ci
+npm run prepare:wenyan
 npm run desktop:dev
 ```
 
@@ -163,7 +165,7 @@ uv venv --python 3.12 .venv
 uv pip install -r engine/requirements-dev.txt
 ```
 
-开发桌面从根目录 `.venv` 启动发布引擎，无需预先冻结 Python。原文整理另需先运行 `python scripts/prepare-opencode.py` 准备当前系统的内置 OpenCode。`npm run dev` 只启动前端服务，完整账号与发布功能请使用 `npm run desktop:dev`。首次启动在应用数据目录内创建本地加密密钥。
+开发桌面从根目录 `.venv` 启动发布引擎，无需预先冻结 Python。预览依赖先通过 `npm run prepare:wenyan` 构建的本地 Wenyan CLI。`npm run dev` 只启动前端服务，完整账号与发布功能请使用 `npm run desktop:dev`。首次启动在应用数据目录内创建本地加密密钥。
 
 ## 检查与构建
 
@@ -193,8 +195,8 @@ $env:PYTHONPATH = "engine"
 在**目标系统、目标架构**上先冻结引擎，再构建桌面安装包。以下示例使用 macOS `.venv`；Windows 将 `.venv/bin/python` 替换为 `.\.venv\Scripts\python.exe`：
 
 ```sh
+npm run prepare:wenyan
 .venv/bin/python scripts/build-engine.py
-.venv/bin/python scripts/prepare-opencode.py
 npm run tauri -- build
 ```
 

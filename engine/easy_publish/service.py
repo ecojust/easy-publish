@@ -7,7 +7,6 @@ import re
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from easy_publish.article_formatting import ArticleFormattingMixin, format_ready, saved_article_input
 from easy_publish.catalog import BY_ID, PLATFORMS, bilibili_categories
 from easy_publish.article_templates import TEMPLATE_IDS, WENYAN_TEMPLATE_IDS, article_format_notes
 from easy_publish.content import ContentInput, image_sources, markdown_html, render_article
@@ -31,8 +30,8 @@ def require(row, message="记录不存在"):
     return row
 
 
-class Service(ArticleFormattingMixin):
-    def __init__(self, data_dir: Path, runtime, formatter=None):
+class Service:
+    def __init__(self, data_dir: Path, runtime):
         self.data_dir, self.runtime = data_dir, runtime
         self.store = Store(data_dir)
         self.wake = asyncio.Event()
@@ -40,7 +39,6 @@ class Service(ArticleFormattingMixin):
         self.account_cancellations = {}
         self.queue_task = None
         self.closing = False
-        self._init_formatting(formatter)
         self.wenyan = WenyanRenderer()
 
     async def start(self):
@@ -69,7 +67,6 @@ class Service(ArticleFormattingMixin):
 
     async def close(self):
         self.closing = True
-        await self.close_formatting()
         await self.wenyan.close()
         await self.runtime.shutdown()
         for task in [self.queue_task, *self.jobs.values()]:
@@ -84,7 +81,6 @@ class Service(ArticleFormattingMixin):
         from .article_templates import ARTICLE_TEMPLATES
         return {"platforms": PLATFORMS,
                 "articleTemplates": ARTICLE_TEMPLATES,
-                "formatting": self.formatting_state(),
                 "contents": [self.store.content(r) for r in self.store.all("SELECT * FROM contents ORDER BY updated DESC")],
                 "accounts": [self.store.account(r) for r in self.store.all("SELECT * FROM accounts ORDER BY rowid")],
                 "batches": [self.store.batch(r) for r in self.store.all("SELECT * FROM batches ORDER BY created DESC LIMIT 200")],
@@ -101,7 +97,14 @@ class Service(ArticleFormattingMixin):
 
     def save_content(self, content: ContentInput, identifier=None):
         previous = json.loads(self.content_row(identifier)["data"]) if identifier else None
-        value = saved_article_input(content.model_dump(), previous)
+        value = content.model_dump()
+        # The original text from the retired plain-text editor is read-only.
+        # Editing Markdown must never erase the archived draft or its source.
+        if previous and isinstance(previous.get("legacyFormatting"), dict):
+            value["legacyFormatting"] = previous["legacyFormatting"]
+            value["sourceText"] = previous.get("sourceText", "")
+        else:
+            value["sourceText"] = ""
         if any(len(t) > 80 for t in value["tags"]):
             raise Problem("单个话题不能超过 80 字")
         if len(value["platformOptions"]) > len(PLATFORMS) or any(
@@ -327,8 +330,6 @@ class Service(ArticleFormattingMixin):
             common.append("请填写标题")
         if not self.runtime.vault.ready:
             common.append("应用内账号存储不可用，请在设置中检查")
-        if content["kind"] == "article" and content.get("inputFormat") == "plain" and not content.get("formatReady", format_ready(content)):
-            common.append("请先整理当前原文并检查预览")
         if content["kind"] == "article" and not content["body"].strip():
             common.append("请填写文章正文")
         if content["kind"] == "video" and not content["videoAssetId"]:

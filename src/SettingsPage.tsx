@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import { Check, Copy, Download, HardDrive, Info, Monitor, Plug, RefreshCw, ShieldCheck, Sparkles } from "lucide-react";
+import { Check, Copy, Download, HardDrive, Info, Monitor, Plug, ShieldCheck } from "lucide-react";
 import { bridge, errorMessage, request } from "./api";
 import { InlineError, Spinner } from "./ui";
-import type { FormattingState, Runtime } from "./shared/types";
+import type { Runtime } from "./shared/types";
 
-export default function SettingsPage({ runtime, formatting, onRefresh }: { runtime: Runtime; formatting: FormattingState; onRefresh: () => Promise<void> }) {
+export default function SettingsPage({ runtime, onRefresh }: { runtime: Runtime; onRefresh: () => Promise<void> }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [mcpConfig, setMcpConfig] = useState<string | null>(null);
@@ -13,12 +13,8 @@ export default function SettingsPage({ runtime, formatting, onRefresh }: { runti
   const [mcpAttempt, setMcpAttempt] = useState(0);
   const [copyBusy, setCopyBusy] = useState(false);
   const [copyMessage, setCopyMessage] = useState<string | null>(null);
-  const [formattingBusy, setFormattingBusy] = useState(false);
-  const [formattingError, setFormattingError] = useState<string | null>(null);
-  const [formattingCheckMessage, setFormattingCheckMessage] = useState<string | null>(null);
   const configurationText = useRef<HTMLTextAreaElement>(null);
   const operation = useRef(false);
-  const formattingOperation = useRef(false);
   useEffect(() => {
     let active = true;
     setMcpLoading(true);
@@ -53,33 +49,9 @@ export default function SettingsPage({ runtime, formatting, onRefresh }: { runti
     catch (cause) { setError(errorMessage(cause)); }
     finally { setBusy(false); operation.current = false; }
   }
-  async function checkFormatting() {
-    if (formattingOperation.current) return;
-    formattingOperation.current = true;
-    setFormattingBusy(true);
-    setFormattingError(null);
-    setFormattingCheckMessage(null);
-    try {
-      const result = await request<FormattingState>("POST", "/api/formatting/check");
-      setFormattingCheckMessage(result.message);
-      await onRefresh();
-    }
-    catch (cause) { setFormattingError(errorMessage(cause)); }
-    finally { setFormattingBusy(false); formattingOperation.current = false; }
-  }
   return <div className="standard-page settings-page"><div className="page-heading"><div><div className="eyebrow">PREFERENCES</div><h1>设置</h1><p>准备好本地环境，专注每一次创作。</p></div></div><InlineError message={error} />
     <section className="settings-section panel"><div className="settings-title"><Monitor size={20} /><div><h2>发布浏览器</h2><p>用于扫码登录和在各平台的创作中心发布内容。</p></div><span className={`status-badge ${runtime.browserReady ? "positive" : runtime.browserInstalling ? "accent" : "neutral"}`}>{runtime.browserInstalling ? <Spinner size={12} /> : runtime.browserReady ? <Check size={12} /> : <Download size={12} />}{runtime.browserReady ? "已就绪" : runtime.browserInstalling ? "正在准备" : "尚未准备"}</span></div><div className="setting-content"><p>{runtime.browserMessage || "首次使用时下载独立浏览器，后续使用会复用本机环境。"}</p><button className="button primary" disabled={busy || runtime.browserInstalling || runtime.browserReady} onClick={installBrowser}>{busy || runtime.browserInstalling ? <Spinner size={16} /> : runtime.browserReady ? <Check size={16} /> : <Download size={16} />}{runtime.browserReady ? "浏览器已就绪" : runtime.browserInstalling ? "准备中，请稍候" : "下载并准备浏览器"}</button></div></section>
     <section className="settings-section panel"><div className="settings-title"><ShieldCheck size={20} /><div><h2>账号与凭据</h2><p>账号会话和公众号凭据只在 Easy Publish 的应用目录内加密保存。</p></div><span className={`status-badge ${runtime.vaultReady ? "positive" : "caution"}`}>{runtime.vaultReady ? "已就绪" : "需要处理"}</span></div><div className="setting-content"><p>{runtime.vaultMessage || (runtime.vaultReady ? "应用账号存储已就绪，不访问系统钥匙串。AppSecret 不会在账号列表中显示。" : "应用账号存储暂不可用，请检查应用数据目录的读写权限。")}</p></div></section>
-    <section className="settings-section panel" aria-labelledby="formatting-settings-title"><div className="settings-title"><Sparkles size={20} /><div><h2 id="formatting-settings-title">文章智能润色</h2><p>无需配置密钥，使用免费模型润色文章并生成 Markdown。</p></div><span className={`status-badge ${!formatting.available ? "caution" : formatting.free ? "positive" : "neutral"}`}>{!formatting.available ? "内置引擎未就绪" : formatting.free ? "免费模型目录已确认" : "待检查免费模型"}</span></div><div className="setting-content">
-      <p>内置 OpenCode{formatting.version ? ` v${formatting.version}` : "：尚未就绪"}</p>
-      <p>模型：{formatting.modelName || formatting.modelId || "尚未确认"}</p>
-      <p>{formatting.message}</p>
-      <p>检查仅查询服务与免费模型目录；文章润色以实际生成结果为准。</p>
-      <p>点击文章页的“润色生成”会将原文发送给免费模型服务。完成后点击右上角“预览”查看模板排版，再决定是否发布。免费模型不可用时会停止，不会切换到收费模型。</p>
-      <InlineError message={formattingError} />
-      {formattingCheckMessage && <p role="status">最近检查：{formattingCheckMessage}</p>}
-      <button className="button primary" disabled={formattingBusy || !formatting.available} onClick={checkFormatting}>{formattingBusy ? <Spinner size={16} /> : <RefreshCw size={16} />}{formattingBusy ? "正在检查免费模型…" : "检查免费模型"}</button>
-    </div></section>
     <section className="settings-section panel"><div className="settings-title"><Plug size={20} /><div><h2>AI 助手与 MCP</h2><p>让支持 MCP 的 AI 助手读取本机稿件、导入素材并创建发布任务。</p></div></div><div className="setting-content">
       <p>使用时保持 Easy Publish 开启，并先在账号管理连接目标平台。助手会按文章或视频筛选可用账号，默认跳过这份稿件已成功提交的平台。</p>
       <p>将下方配置合并到 AI 助手的 MCP 设置。移动应用后，请重新复制配置。</p>

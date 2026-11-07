@@ -17,7 +17,7 @@ class ContentInput(BaseModel):
     kind: Literal["article", "video"]
     title: str = Field(default="", max_length=200)
     body: str = Field(default="", max_length=500_000)
-    inputFormat: Literal["plain", "markdown"] = "markdown"
+    inputFormat: Literal["markdown"] = "markdown"
     sourceText: str = Field(default="", max_length=500_000)
     description: str = Field(default="", max_length=10_000)
     tags: list[str] = Field(default_factory=list, max_length=20)

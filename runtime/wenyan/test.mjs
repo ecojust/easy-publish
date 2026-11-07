@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdtemp, cp, rm, readFile } from "node:fs/promises";
+import { mkdtemp, cp, rm, readFile, mkdir, writeFile, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -11,6 +11,7 @@ import { createWenyanCore } from "@wenyan-md/core";
 
 const directory = path.dirname(fileURLToPath(import.meta.url));
 const runtime = path.join(directory, "dist/render.cjs");
+const cli = path.join(directory, "dist/wenyan-cli.mjs");
 const themes = ["default", "orangeheart", "rainbow", "lapis", "pie", "maize", "purple", "phycat"];
 const sample = "# 阅读的形状\n\n每份**创作**都值得被认真阅读。\n\n## 写成故事\n\n> 留白，给思考和想象。\n\n- 原文\n- 润色\n\n|阶段|结果|\n|---|---|\n|一|完成|\n\n```js\nconst answer = 42;\n```\n\n[来源](https://example.test/source)";
 const svgShape = (node) => ({
@@ -21,9 +22,9 @@ const svgShape = (node) => ({
   children: [...node.children].map(svgShape),
 });
 
-async function run(input, { entry = runtime, args = [], cwd = directory, chunks = false } = {}) {
+async function run(input, { entry = runtime, args = [], cwd = directory, chunks = false, env = process.env } = {}) {
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [entry, ...args], { cwd, stdio: ["pipe", "pipe", "pipe"] });
+    const child = spawn(process.execPath, [entry, ...args], { cwd, env, stdio: ["pipe", "pipe", "pipe"] });
     let stdout = "", stderr = "";
     const timeout = setTimeout(() => { child.kill(); reject(new Error("Renderer timed out")); }, 30_000);
     child.stdout.setEncoding("utf8").on("data", (value) => { stdout += value; });
@@ -158,6 +159,7 @@ test("dist runs independently of node_modules and includes distribution notices"
     assert.equal(response.stderr, "");
     assert.ok(JSON.parse(response.stdout).html.includes('data-provider="WenYan"'));
     const licenses = JSON.parse(await readFile(path.join(temporary, "THIRD_PARTY.json"), "utf8"));
+    assert.ok(licenses.some((entry) => entry.name === "@wenyan-md/cli" && entry.version === "2.0.12" && entry.licenseFiles.includes("LICENSE")));
     assert.ok(licenses.some((entry) => entry.name === "@wenyan-md/core" && entry.version === "3.0.12" && entry.licenseFiles.includes("LICENSE")));
     assert.ok(licenses.every((entry) => entry.licenseFiles.length > 0), "Every bundled package must retain its license text");
   } finally { await rm(temporary, { recursive: true, force: true }); }
@@ -182,4 +184,45 @@ test("overlong body and custom styling fields are rejected without echoing conte
   assert.equal(response.code, 0);
   assert.doesNotMatch(response.stdout + response.stderr, /private-source|private-css/);
   for (const line of response.stdout.trim().split("\n")) assert.deepEqual(JSON.parse(line), { error: "文章渲染失败，请重试。" });
+});
+
+
+test("bundled official CLI exposes only render and reports its pinned version", async () => {
+  const version = await run("", { entry: cli, args: ["--version"] });
+  assert.equal(version.code, 0);
+  assert.equal(version.stdout.trim(), "2.0.12");
+  const help = await run("", { entry: cli, args: ["--help"] });
+  assert.match(help.stdout, /render \[options\]/);
+  assert.doesNotMatch(help.stdout, /(?:publish|credential|token|serve|theme) \[options\]/);
+  const blocked = await run("", { entry: cli, args: ["publish"] });
+  assert.notEqual(blocked.code, 0);
+  const direct = await run("## CLI 正文\n\n**保留格式**。", { entry: cli, args: ["render", "--theme", "lapis"] });
+  assert.equal(direct.code, 0);
+  assert.equal(direct.stderr, "");
+  assert.ok(direct.stdout.includes('data-provider="WenYan"'));
+  assertSafe(parsed(direct.stdout));
+});
+
+test("official CLI frontmatter does not override account themes or access personal configuration", async () => {
+  const temporary = await mkdtemp(path.join(tmpdir(), "easy-publish-wenyan-config-test-"));
+  try {
+    const config = path.join(temporary, "wenyan-md");
+    await mkdir(config);
+    await writeFile(path.join(config, "config.json"), JSON.stringify({ themes: { purple: { path: "private.css" } } }));
+    await writeFile(path.join(config, "private.css"), "section { color: rgb(1, 2, 3); } h2::before { content: 'PERSONAL-THEME-SENTINEL'; }");
+    const environment = { ...process.env, HOME: temporary, USERPROFILE: temporary, XDG_CONFIG_HOME: temporary, APPDATA: temporary };
+    const body = "---\ntitle: FRONTMATTER-TITLE-NOT-BODY\ndescription: 文章摘要\ntheme: ../../private.css\ncustomTheme: file:///private.css\n---\n\n## 正文标题\n\n保留内容。";
+    const response = await run(JSON.stringify({ body, theme: "purple" }), { env: environment });
+    assert.equal(response.code, 0);
+    const html = JSON.parse(response.stdout).html;
+    const document = parsed(html);
+    assert.ok(document.querySelector("blockquote")?.textContent.includes("文章摘要"), "The actual official CLI frontmatter pipeline ran");
+    assert.ok(document.body.textContent.includes("正文标题"));
+    assert.doesNotMatch(html, /FRONTMATTER-TITLE-NOT-BODY|PERSONAL-THEME-SENTINEL|rgb\(1, 2, 3\)|private\.css/);
+    assert.deepEqual((await readdir(config)).sort(), ["config.json", "private.css"]);
+    const imagePost = await run(JSON.stringify({ body: "---\ntype: image\nimage_list:\n  - file:///private/image.png\n---\n正文", theme: "purple" }), { env: environment });
+    assert.deepEqual(JSON.parse(imagePost.stdout), { error: "文章渲染失败，请重试。" });
+    const custom = await run("正文", { entry: cli, args: ["render", "--custom-theme", path.join(config, "private.css")], env: environment });
+    assert.notEqual(custom.code, 0);
+  } finally { await rm(temporary, { recursive: true, force: true }); }
 });

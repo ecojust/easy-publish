@@ -73,7 +73,7 @@ def test_schema_three_migration_preserves_default_selection_and_account_state(tm
             assert accounts["wechat-default"]["defaultSelected"] is True
             assert accounts["zhihu-old"]["defaultSelected"] is False
             assert "wechatTemplateId" not in accounts["zhihu-old"]
-            assert store.one("PRAGMA user_version")["user_version"] == 6
+            assert store.one("PRAGMA user_version")["user_version"] == 7
         finally:
             store.close()
 

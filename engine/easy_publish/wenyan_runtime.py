@@ -13,6 +13,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import tempfile
 
 import patchright
 
@@ -33,17 +34,23 @@ def _runtime_paths() -> tuple[Path, Path]:
     script = Path(__file__).resolve().parent / "vendor" / "wenyan" / "render.cjs"
     if not script.is_file() and not getattr(sys, "frozen", False):
         script = Path(__file__).resolve().parents[2] / "runtime" / "wenyan" / "dist" / "render.cjs"
-    if not node.is_file() or not script.is_file():
+    if not node.is_file() or not script.is_file() or not (script.parent / "wenyan-cli.mjs").is_file():
         raise WenyanError("未找到内置 Wenyan 模板引擎，请安装完整版本的 Easy Publish。")
     return node, script
 
 
-def _environment() -> dict[str, str]:
+def _environment(directory: Path | None = None) -> dict[str, str]:
     # No NODE_OPTIONS, provider credentials, executable override or personal
     # configuration. The renderer has no network/account/publishing features.
     allowed = {"SYSTEMROOT", "WINDIR", "TEMP", "TMP", "TMPDIR", "LANG", "LC_ALL"}
     environment = {key: value for key, value in os.environ.items() if key.upper() in allowed}
     environment["NODE_ENV"] = "production"
+    if directory is not None:
+        # Official CLI rendering is adapted to avoid config access entirely;
+        # give it an empty owned home as an additional isolation boundary.
+        environment.update({name: str(directory) for name in (
+            "HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME",
+        )})
     return environment
 
 
@@ -56,16 +63,18 @@ class WenyanRenderer:
         self._cache: OrderedDict[str, str] = OrderedDict()
         self._cache_size = 0
         self._closed = False
+        self._temporary: tempfile.TemporaryDirectory | None = None
 
     async def _start(self) -> asyncio.subprocess.Process:
         if self._process is not None and self._process.returncode is None:
             return self._process
         await self._stop()
         node, script = _runtime_paths()
+        self._temporary = tempfile.TemporaryDirectory(prefix="easy-publish-wenyan-")
         try:
             options = {"creationflags": subprocess.CREATE_NO_WINDOW} if sys.platform == "win32" else {}
             self._process = await asyncio.create_subprocess_exec(
-                str(node), str(script), "--stdio", cwd=str(script.parent), env=_environment(),
+                str(node), str(script), "--stdio", cwd=str(script.parent), env=_environment(Path(self._temporary.name)),
                 stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE, limit=MAX_OUTPUT + 1, **options,
             )
@@ -104,6 +113,9 @@ class WenyanRenderer:
         if reader is not None:
             reader.cancel()
             await asyncio.gather(reader, return_exceptions=True)
+        if self._temporary is not None:
+            self._temporary.cleanup()
+            self._temporary = None
 
     async def render(self, body: str, theme: str) -> str:
         from .article_templates import WENYAN_TEMPLATE_IDS

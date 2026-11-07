@@ -135,7 +135,7 @@ def test_version_one_database_gets_additive_metadata_table(tmp_path):
         assert account["label"] == "Existing account" and account["status"] == "ready"
         assert "bilibiliCategories" not in account
         assert store.all("SELECT * FROM account_metadata") == []
-        assert store.one("PRAGMA user_version")["user_version"] == 6
+        assert store.one("PRAGMA user_version")["user_version"] == 7
         assert account["defaultSelected"] is True
     finally:
         store.close()

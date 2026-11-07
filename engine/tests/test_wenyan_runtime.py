@@ -76,6 +76,7 @@ def test_real_official_themes_share_one_process_preserve_images_and_cache():
         finally:
             await renderer.close()
         assert process.returncode is not None
+        assert renderer._temporary is None
         assert not renderer._cache
     asyncio.run(scenario())
 
@@ -196,3 +197,21 @@ def test_renderer_environment_ignores_personal_node_and_provider_settings(monkey
     assert 'private-value' not in environment.values()
     node, _ = runtime._runtime_paths()
     assert 'patchright/driver/node' in str(node).replace('\\', '/')
+
+
+def test_cli_home_is_owned_and_removed_after_renderer_shutdown(tmp_path):
+    async def scenario():
+        renderer = runtime.WenyanRenderer()
+        try:
+            result = await renderer.render('## Markdown\n\n直接预览。', 'purple')
+            assert '直接预览' in result
+            owned = Path(renderer._temporary.name)
+            assert owned.is_dir()
+            environment = runtime._environment(owned)
+            for key in ('HOME', 'USERPROFILE', 'APPDATA', 'XDG_CONFIG_HOME', 'XDG_DATA_HOME', 'XDG_CACHE_HOME'):
+                assert environment[key] == str(owned)
+            assert list(owned.iterdir()) == [], 'CLI rendering must not create account or configuration stores'
+        finally:
+            await renderer.close()
+        assert not owned.exists() and renderer._temporary is None
+    asyncio.run(scenario())

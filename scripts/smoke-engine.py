@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import argparse
-import importlib.util
 import json
 import os
 from pathlib import Path
@@ -135,7 +134,7 @@ def check_mcp(binary: Path, environment: dict[str, str], directory: Path, port: 
             raise RuntimeError("MCP did not use the desktop's shared content library")
         preview = tool(5, "preview_article", {"body": saved["body"], "articleTemplateId": "journal", "platformId": "wechat"})
         if "中文文章" not in preview.get("html", "") or "style=" not in preview["html"]:
-            raise RuntimeError("Frozen MCP article formatting failed")
+            raise RuntimeError("Frozen MCP article template rendering failed")
         wenyan = tool(6, "preview_article", {"body": saved["body"], "articleTemplateId": "wenyan-phycat", "platformId": "wechat"})
         if "中文文章" not in wenyan.get("html", "") or 'data-provider="WenYan"' not in wenyan["html"] or "style=" not in wenyan["html"]:
             raise RuntimeError("Frozen MCP Wenyan rendering failed")
@@ -167,17 +166,6 @@ def check_mcp(binary: Path, environment: dict[str, str], directory: Path, port: 
 def verify(binary: Path, timeout: int, expected_version: str, clean_environment: bool = False) -> None:
     if not binary.is_file():
         raise RuntimeError("Embedded engine binary does not exist")
-    # Check the exact sibling shipped alongside this engine, never an executable on PATH.
-    opencode = binary.with_name(binary.name.replace("easy-publish-engine", "easy-publish-opencode", 1))
-    if opencode == binary or not opencode.is_file() or opencode.is_symlink():
-        raise RuntimeError("Bundled OpenCode sibling is missing or invalid")
-    spec = importlib.util.spec_from_file_location("prepare_opencode", Path(__file__).with_name("prepare-opencode.py"))
-    preparation = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(preparation)
-    manifest, _ = preparation.pinned_target(preparation.native_target())
-    preparation.verify_architecture(opencode, preparation.native_target())
-    preparation.smoke_version(opencode, manifest["version"])
-    preparation.smoke_server(opencode, manifest["version"])
     with tempfile.TemporaryDirectory(prefix="easy-publish-engine-smoke-") as directory:
         environment = os.environ.copy()
         if clean_environment:
@@ -188,7 +176,6 @@ def verify(binary: Path, timeout: int, expected_version: str, clean_environment:
         environment.pop("PYTHONHOME", None)
         environment.pop("EASY_PUBLISH_TESTING", None)
         environment.pop("EASY_PUBLISH_TEST_KEY", None)
-        environment["EASY_PUBLISH_OPENCODE_PATH"] = str(opencode)
         child = subprocess.Popen(
             [str(binary), "--data-dir", directory, "--parent-pid", str(os.getpid())], stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL, env=environment,
@@ -218,6 +205,8 @@ def verify(binary: Path, timeout: int, expected_version: str, clean_environment:
             status, state = request(port, "/api/state", token)
             if status != 200:
                 raise RuntimeError("Authenticated state request failed")
+            if "formatting" in state:
+                raise RuntimeError("Removed model-generation service is still exposed")
             for field in ("platforms", "accounts", "contents", "batches"):
                 if not isinstance(state.get(field), list):
                     raise RuntimeError(f"State is missing its {field} list")
@@ -301,7 +290,7 @@ def verify(binary: Path, timeout: int, expected_version: str, clean_environment:
                     child.kill()
                     child.wait(timeout=5)
             child.stdout.close()
-    print("Embedded engine smoke passed: bundled OpenCode version, startup, app-owned encrypted accounts, authentication, UTF-8 content, Bilibili/Kuaishou workers, stdio MCP and template preview, graceful shutdown.")
+    print("Embedded engine smoke passed: startup, app-owned encrypted accounts, authentication, UTF-8 content, Bilibili/Kuaishou workers, stdio MCP and template preview, graceful shutdown.")
 
 
 def main() -> None:

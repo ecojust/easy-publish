@@ -54,7 +54,14 @@ class Store:
             # Upgrade the former default for future submissions only. Frozen
             # batches keep their original template IDs; other chosen themes stay.
             self.db.execute("UPDATE account_preferences SET wechat_template_id='wenyan-default' WHERE wechat_template_id='clean' AND account_id IN (SELECT id FROM accounts WHERE platform='wechat')")
-        self.db.execute("PRAGMA user_version=6")
+        if schema_version < 7:
+            from .markdown_migration import migrate_article
+            for row in self.db.execute("SELECT id,data FROM contents").fetchall():
+                previous = json.loads(row["data"])
+                migrated = migrate_article(previous)
+                if migrated != previous:
+                    self.db.execute("UPDATE contents SET data=?,revision=revision+1 WHERE id=?", (dump(migrated), row["id"]))
+        self.db.execute("PRAGMA user_version=7")
         self.db.commit()
 
     @contextmanager
@@ -88,14 +95,12 @@ class Store:
 
     def content(self, row):
         data = json.loads(row["data"])
-        from .article_formatting import format_ready
         data.setdefault("articleTemplateId", "clean")
         data.setdefault("inputFormat", "markdown")
         data.setdefault("sourceText", "")
         data.setdefault("videoOptionsSource", "content")
-        data["formatReady"] = format_ready(data)
-        data.setdefault("formatModel", None)
-        data.pop("formatSourceHash", None)
+        for key in ("formatReady", "formatModel", "formatSourceHash", "legacyFormatting"):
+            data.pop(key, None)
         return {**data, "id": row["id"], "createdAt": row["created"],
                 "updatedAt": row["updated"], "revision": row["revision"],
                 "platformPublicationStates": self.publication_states(row["id"])}

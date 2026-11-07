@@ -46,7 +46,7 @@ macOS ARM、Intel 和 Windows 安装包都提供该入口，普通用户不需�
 }
 ```
 
-省略 `inputFormat` 时按 Markdown 保存，agent 已经写好的文章不必再次调用 OpenCode。模板包括八款 `wenyan-*` 官方主题和六款兼容主题；完整 ID 由 `list_platforms` 返回，说明见 [文章模板](article-templates.md)。公众号实际发布使用该账号在账号管理中设置的模板；稿件的 `articleTemplateId` 保留非公众号与旧数据兼容。返回的 `content.id` 用于后续操作。正文中的图片先使用 `import_asset` 导入，再通过 `![说明](easy-asset://素材ID)` 引用；封面使用返回的图片 `asset.id` 填入 `coverAssetId`。
+文章 `inputFormat` 只接受 `markdown`（省略时使用该值），agent 写好的正文直接保存并通过 Wenyan CLI 预览。模板包括八款 `wenyan-*` 官方主题和六款兼容主题；完整 ID 由 `list_platforms` 返回，说明见 [文章模板](article-templates.md)。公众号实际发布使用该账号在账号管理中设置的模板；稿件的 `articleTemplateId` 保留非公众号与旧数据兼容。返回的 `content.id` 用于后续操作。正文中的图片先使用 `import_asset` 导入，再通过 `![说明](easy-asset://素材ID)` 引用；封面使用返回的图片 `asset.id` 填入 `coverAssetId`。
 
 公众号预览在 `preview_article` 中传入 `body` 和 `accountId`，即按该账号当前模板生成。`accountId` 仅允许公众号账号；如果同时传 `platformId`，必须是 `wechat`。省略账号时仍可按 `articleTemplateId` 和 `platformId` 预览。创建发布批次时冻结每个公众号的模板，后续调整账号模板不会改变队列内任务。
 
