@@ -32,6 +32,7 @@ class AccountPreferencesInput(Input):
     # The route applies only explicitly supplied fields, preserving the others.
     defaultSelected: StrictBool = True
     wechatTemplateId: ArticleTemplateId = "clean"
+    videoOptions: dict[str, str] = Field(default_factory=dict, max_length=10)
 
     @model_validator(mode="after")
     def require_change(self):
@@ -197,7 +198,7 @@ def create_app(data_dir: Path, token: str, runtime=None, *, formatter=None, mcp_
     @app.put("/api/accounts/{identifier}/preferences")
     async def account_preferences(identifier: str, value: AccountPreferencesInput):
         changes = value.model_dump(exclude_unset=True)
-        names = {"defaultSelected": "default_selected", "wechatTemplateId": "wechat_template_id"}
+        names = {"defaultSelected": "default_selected", "wechatTemplateId": "wechat_template_id", "videoOptions": "video_options"}
         return service.set_account_preferences(identifier, **{names[key]: item for key, item in changes.items()})
 
     @app.delete("/api/accounts/{identifier}")

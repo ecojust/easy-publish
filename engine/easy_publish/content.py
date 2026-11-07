@@ -26,6 +26,7 @@ class ContentInput(BaseModel):
     coverAssetId: str | None = None
     imageAssetIds: list[str] = Field(default_factory=list, max_length=100)
     platformOptions: dict[str, dict[str, str]] = Field(default_factory=dict)
+    videoOptionsSource: Literal["account", "content"] = "content"
     articleTemplateId: ArticleTemplateId = "clean"
 
 

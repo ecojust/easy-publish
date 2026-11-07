@@ -73,7 +73,7 @@ def test_schema_three_migration_preserves_default_selection_and_account_state(tm
             assert accounts["wechat-default"]["defaultSelected"] is True
             assert accounts["zhihu-old"]["defaultSelected"] is False
             assert "wechatTemplateId" not in accounts["zhihu-old"]
-            assert store.one("PRAGMA user_version")["user_version"] == 5
+            assert store.one("PRAGMA user_version")["user_version"] == 6
         finally:
             store.close()
 
@@ -288,7 +288,7 @@ def test_wenyan_default_migration_is_once_and_preserves_explicit_themes_and_snap
     for identifier, template in (("default", "clean"), ("chosen", "forest")):
         store.execute("INSERT INTO accounts VALUES (?,?,?,?,?,?,?)",
                       (identifier, "wechat", identifier, "ready", "connected", "before", 1))
-        store.execute("INSERT INTO account_preferences VALUES (?,?,?)", (identifier, 0, template))
+        store.execute("INSERT INTO account_preferences(account_id,default_selected,wechat_template_id) VALUES (?,?,?)", (identifier, 0, template))
     frozen = dump({"body": "Saved body", "accountTemplateIds": {"default": "clean"}})
     store.execute("INSERT INTO batches VALUES (?,?,?,?,?,?,?,?,?)", ("old-batch", "old-request", "content", "title", "article", "publish", "before", frozen, "[]"))
     store.execute("PRAGMA user_version=4")

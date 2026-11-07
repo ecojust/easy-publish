@@ -41,7 +41,7 @@ API 成功直接返回 JSON，失败为 `{"error":"公开且已脱敏的错误",
 | GET /api/assets/:id | 返回 Asset 公开元数据，不返回本地路径 |
 | GET /api/assets/:id/preview | 图片返回 `{dataUrl}` |
 | POST /api/accounts | `{platformId,label,credentials?:{appId,appSecret}}`；返回 Account |
-| PUT /api/accounts/:id/preferences | `{defaultSelected?:boolean,wechatTemplateId?:ArticleTemplateId}`；非空部分更新，严格布尔；模板字段仅公众号可用，不改变登录或已创建任务 |
+| PUT /api/accounts/:id/preferences | `{defaultSelected?:boolean,wechatTemplateId?:ArticleTemplateId,videoOptions?:Record<string,string>}`；非空部分更新，严格布尔；模板字段仅公众号可用，不改变登录或已创建任务 |
 | DELETE /api/accounts/:id | 删除本地账号和会话，不操作平台内容 |
 | POST /api/accounts/:id/login | 启动登录／公众号连接检查，返回 `{ok:true}`；state 轮询进度 |
 | POST /api/accounts/:id/check | 检查会话；返回 `{ok:true}` |
@@ -57,7 +57,7 @@ API 成功直接返回 JSON，失败为 `{"error":"公开且已脱敏的错误",
 
 SQLite 保存稿件、账号公开元数据、批次及各目标状态。`Content.platformPublicationStates` 从全部任务读取每个平台最新的 submitted／published／unknown 回执，不受界面最近 200 批限制；草稿和失败不覆盖历史成功。已发布稿件可以使用新的 requestId 再次投稿，同一 requestId 仍返回原批次。批次捕获不可变稿件快照、账号 ID／名称和目标，逐个目标执行，分别给出结果。已有待执行任务的账号不能被删除或重新登录。明确失败的目标可重试；成功目标不重复，结果未知的目标须先在平台核对。关闭应用后不自动重新提交未确认结果。
 
-`Account.defaultSelected` 保存在独立的 `account_preferences` 表，旧账号缺少记录时返回 true；SQLite schema 版本 5 将公众号的旧默认 clean 一次升级为 wenyan-default，保留其他主题与账号开关；新账号默认 wenyan-default，已冻结批次不迁移。删除账号同步清理偏好，重新连接不覆盖偏好。文章和视频页均按偏好、连接状态、类型／操作能力和既有投稿历史自动筛选，不另设账号勾选区；已有投稿记录可显式加入本次再次发布。发布前检查绑定稿件、目标和模式，任意变化使旧检查失效，过期响应不能重新启用发布。账号开关不会创建任务，常规轮询不覆盖未保存稿件。
+`Account.defaultSelected` 保存在独立的 `account_preferences` 表，旧账号缺少记录时返回 true；SQLite schema 版本 5 将公众号的旧默认 clean 一次升级为 wenyan-default，版本 6 增加可空的 video_options JSON，保留其他主题与账号开关；新账号默认 wenyan-default，已冻结批次不迁移。删除账号同步清理偏好，重新连接不覆盖偏好。文章和视频页均按偏好、连接状态、类型／操作能力和既有投稿历史自动筛选，不另设账号勾选区；已有投稿记录可显式加入本次再次发布。发布前检查绑定稿件、目标和模式，任意变化使旧检查失效，过期响应不能重新启用发布。账号开关不会创建任务，常规轮询不覆盖未保存稿件。
 
 `ContentInput.articleTemplateId` 包含八款 wenyan-* 官方主题及 clean／editorial／journal／tech／forest／artdeco 六款兼容主题，旧 API 稿件仍默认 clean。新公众号任务以账号的wechatTemplateId为准，创建批次时在accountTemplateIds映射中冻结；之后修改账号模板不会改变队列内任务。Markdown 保持原稿，在生成每个目标的 payload 时按模板及平台转换 HTML；模板缩略图、预览与实际提交使用同一服务端渲染器；API 与 MCP 复用引擎的 ArticleTemplateId 类型。官方及兼容模板来源、图注和平台兼容说明见 [文章模板](article-templates.md)。
 
@@ -86,3 +86,5 @@ POSIX 目录／文件要求当前用户所有且权限为 0700／0600，拒绝�
 MCP 工具复用 Service 的预检、不可变快照、账号类型限制和发布队列。省略 accountIds 时过滤 defaultSelected 为 true、已连接、支持内容类型／操作且没有历史 submitted／published／unknown 的平台；显式账号必须通过类型与预检。发布请求 UUID 在默认账号筛选之前查重，避免已成功的重试被当成新请求。详见 [MCP 接入说明](mcp.md)。
 
 Wenyan 排版使用锁定的 `@wenyan-md/core@3.0.12`，运行资源通过 `runtime/wenyan` 构建并冻结进引擎，复用 Patchright Node。每个 Service 懒启动一个 JSONL 子进程，异步串行排版并缓存最近结果；设定超时、输入输出及缓存上限，退出时清理。不会从 PATH 查找用户 CLI，也不运行 npm 或读取个人配置。原文 HTML 在 Markdown 解析时转义，官方脚注插值同样转义，最终主题输出再净化；只保留静态装饰，禁止活动内容与网络资源加载。预览、MCP 及微信 payload 共享这份输出；Markdown 图片检查使用轻量解析，不启动排版进程。
+
+视频专属参数由账号管理持久化为 `Account.videoOptions`（未设置为 null）。桌面视频 `videoOptionsSource` 明确为 account，忽略但不删除稿件旧 platformOptions。API/MCP 缺省 content：目标平台有非空稿件参数时整份使用，否则回退账号；不混合两种来源。每个新视频批次的 accountVideoOptions 映射冻结实际参数，预检与 worker payload 使用同一解析。旧批次无映射时只使用原内容快照，不读当前偏好；设置及账号分区变化使界面旧预检失效。B 站分区按各账号验证，不求多个账号的交集。

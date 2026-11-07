@@ -13,10 +13,11 @@ COVER_PLATFORMS = {"wechat", "xueqiu", "kuaishou", "xiaohongshu", "channels", "b
 AUTHOR_PLATFORMS = {"wechat", "dayu"}
 
 
-def target_options(platform_id: str, options: dict) -> dict:
+def target_options(platform_id: str, options: dict, kind: str | None = None) -> dict:
     platform_id = ALIASES.get(platform_id, platform_id)
-    allowed = {field["key"] for field in BY_ID.get(platform_id, {}).get("fields", [])}
-    if platform_id == "dayu":
+    allowed = {field["key"] for field in BY_ID.get(platform_id, {}).get("fields", [])
+               if kind is None or kind in field["kinds"]}
+    if platform_id == "dayu" and kind in {None, "article"}:
         allowed.add("cover_indices")  # Used by the article adapter, including worker fixtures.
     selected = {key: value for key, value in options.items() if key in allowed}
     if platform_id == "bilibili" and selected.get("copyright") != "2":
@@ -30,7 +31,7 @@ def project_content(content: dict, platform_id: str) -> dict:
     """Apply before asset lookup, validation or conversion for a queue target."""
     platform_id = ALIASES.get(platform_id, platform_id)
     selected = dict(content)
-    selected["platformOptions"] = {platform_id: target_options(platform_id, content.get("platformOptions", {}).get(platform_id, {}))}
+    selected["platformOptions"] = {platform_id: target_options(platform_id, content.get("platformOptions", {}).get(platform_id, {}), content["kind"])}
     if content["kind"] == "video":
         selected.update(body="", imageAssetIds=[], author="")
     else:
@@ -48,7 +49,7 @@ def project_content(content: dict, platform_id: str) -> dict:
 def project_payload(payload: PublishPayload, platform_id: str | None = None) -> PublishPayload:
     """Keep direct adapter calls consistent with the service's target payloads."""
     platform_id = ALIASES.get(platform_id or payload.platform_id, platform_id or payload.platform_id)
-    changes = {"options": target_options(platform_id, payload.options)}
+    changes = {"options": target_options(platform_id, payload.options, payload.kind)}
     if payload.kind == "video":
         changes.update(body_html="", images={}, author="")
     else:

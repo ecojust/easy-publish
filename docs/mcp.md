@@ -46,7 +46,7 @@ macOS ARM、Intel 和 Windows 安装包都提供该入口，普通用户不需�
 }
 ```
 
-省略 `inputFormat` 时按 Markdown 保存，agent 已经写好的文章不必再次调用 OpenCode。模板 ID 为 `clean`（清爽蓝）、`editorial`（墨色杂志）、`journal`（暖色手记）、`tech`（理性科技）、`forest`（森林来信）、`artdeco`（黑金画报）。公众号实际发布使用该账号在账号管理中设置的模板；稿件的 `articleTemplateId` 保留非公众号与旧数据兼容。返回的 `content.id` 用于后续操作。正文中的图片先使用 `import_asset` 导入，再通过 `![说明](easy-asset://素材ID)` 引用；封面使用返回的图片 `asset.id` 填入 `coverAssetId`。
+省略 `inputFormat` 时按 Markdown 保存，agent 已经写好的文章不必再次调用 OpenCode。模板包括八款 `wenyan-*` 官方主题和六款兼容主题；完整 ID 由 `list_platforms` 返回，说明见 [文章模板](article-templates.md)。公众号实际发布使用该账号在账号管理中设置的模板；稿件的 `articleTemplateId` 保留非公众号与旧数据兼容。返回的 `content.id` 用于后续操作。正文中的图片先使用 `import_asset` 导入，再通过 `![说明](easy-asset://素材ID)` 引用；封面使用返回的图片 `asset.id` 填入 `coverAssetId`。
 
 公众号预览在 `preview_article` 中传入 `body` 和 `accountId`，即按该账号当前模板生成。`accountId` 仅允许公众号账号；如果同时传 `platformId`，必须是 `wechat`。省略账号时仍可按 `articleTemplateId` 和 `platformId` 预览。创建发布批次时冻结每个公众号的模板，后续调整账号模板不会改变队列内任务。
 
@@ -65,7 +65,9 @@ macOS ARM、Intel 和 Windows 安装包都提供该入口，普通用户不需�
 
 ## 视频与再次发布
 
-视频先通过 `import_asset` 导入，使用 `kind: "video"`、`videoAssetId`、标题、描述、标签及可选封面保存。B 站还需要分区和原创／转载信息；`list_accounts` 返回当前账号可用分区，选项填入 `platformOptions.bilibili`。同一视频可以同时填写多个平台的字段，预检与执行均只使用目标需要的字段；例如抖音忽略自定义封面，B 站原创忽略转载来源。原稿保留，真正必填的字段仍校验。快手按页面要求完成作者声明；登录验证或平台操作仍可能需要用户在发布浏览器中处理。
+视频先通过 `import_asset` 导入，使用 `kind: "video"`、`videoAssetId`、标题、描述、标签及可选封面保存。B 站还需要分区和原创／转载信息，用户可在账号管理保存；`list_accounts` 返回 `videoOptions` 及当前账号可用分区。推荐设置 `videoOptionsSource: "account"`，逐账号采用保存的参数，支持同平台账号不同分区。
+
+为了兼容已有 agent，省略 `videoOptionsSource` 时按 `"content"` 处理：该平台有非空 `platformOptions` 时使用这份稿件参数，否则回退到账号设置；两份参数不会混合。`"account"` 模式始终只用账号设置，即使稿件保留旧字段。桌面视频页固定使用账号模式。新批次冻结每个账号实际使用的参数，旧批次重试保持原稿件参数。同一视频可以同时填写多个平台的字段，预检与执行均只使用目标需要的字段；例如抖音忽略自定义封面，B 站原创忽略转载来源。原稿保留，真正必填的字段仍校验。快手按页面要求完成作者声明；登录验证或平台操作仍可能需要用户在发布浏览器中处理。
 
 稿件可以再次发布。自动选择会跳过有历史回执的平台；明确指定兼容账号并使用新 UUID，可创建新的发布批次。编辑原稿不会改变已创建批次的内容快照。`draft_created` 只是平台草稿，`submitted` 是已受理／待审核，`published` 是取得公开发布确认；`unknown` 必须先到平台核对，agent 不应自动重发。
 

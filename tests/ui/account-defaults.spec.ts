@@ -169,7 +169,7 @@ test("history requires explicit article repeats and only relevant account change
   expect(await page.evaluate(() => (window as any).__fixture.state.batches)).toHaveLength(2);
 });
 
-for (const change of ["account", "categories"] as const) {
+for (const change of ["account", "categories", "video preferences"] as const) {
   test(`video preflight rejects late results after ${change} changes`, async ({ page }) => {
     await page.addInitScript(() => {
       const original = window.easyPublish!.apiRequest;
@@ -181,8 +181,6 @@ for (const change of ["account", "categories"] as const) {
     await page.goto("/");
     await navigate(page, "视频");
     await page.getByRole("textbox", { name: "视频标题" }).fill("视频检查期间更新账号");
-    await page.getByLabel("视频分区").selectOption("101");
-    await page.getByLabel("创作类型").selectOption("1");
     await page.getByRole("button", { name: "检查发布内容", exact: true }).click();
     await expect.poll(() => page.evaluate(() => !!(window as any).__releasePreflight)).toBe(true);
     if (change === "account") {
@@ -190,11 +188,25 @@ for (const change of ["account", "categories"] as const) {
       await page.getByRole("switch", { name: "品牌抖音 发布时默认选中", exact: true }).uncheck();
       await navigate(page, "视频");
       await expect(target(page, "品牌抖音")).toHaveCount(0);
-    } else {
+    } else if (change === "categories") {
+      await navigate(page, "账号管理");
       await page.evaluate(() => { (window as any).__fixture.state.accounts.find((account: any) => account.id === "a-bilibili").bilibiliCategories = []; });
-      await expect(page.getByText("连接或验证账号以获取分区。", { exact: true })).toBeVisible();
-      await expect(page.getByLabel("视频分区")).toBeDisabled();
+      await page.getByRole("button", { name: "设置 品牌哔哩哔哩 视频发布设置", exact: true }).click();
+      const dialog = page.getByRole("dialog", { name: "品牌哔哩哔哩 · 视频发布设置", exact: true });
+      await expect(dialog.getByText("尚未获取此账号的视频分区，请连接或检查此账号。", { exact: true })).toBeVisible();
+      await expect(dialog.getByLabel("视频分区").locator("option")).toHaveText(["请选择视频分区", "101（需重新选择）"]);
+      await dialog.getByRole("button", { name: "取消", exact: true }).click();
+      await navigate(page, "视频");
+    } else {
+      await navigate(page, "账号管理");
+      await page.getByRole("button", { name: "设置 品牌哔哩哔哩 视频发布设置", exact: true }).click();
+      const dialog = page.getByRole("dialog", { name: "品牌哔哩哔哩 · 视频发布设置", exact: true });
+      await dialog.getByLabel("视频分区").selectOption("102");
+      await dialog.getByRole("button", { name: "保存视频设置", exact: true }).click();
+      await navigate(page, "视频");
     }
+    await expect(page.getByRole("textbox", { name: "视频标题" })).toHaveValue("视频检查期间更新账号");
+    await expect(page.locator(".video-workspace:visible").getByLabel("视频分区")).toHaveCount(0);
     await page.evaluate(() => (window as any).__releasePreflight());
     await expect(page.getByRole("button", { name: "检查发布内容", exact: true })).toBeEnabled();
     await expect(page.getByRole("button", { name: "发布到已开启账号", exact: true })).toBeDisabled();

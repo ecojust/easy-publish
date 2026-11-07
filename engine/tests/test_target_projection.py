@@ -54,6 +54,10 @@ def test_one_filled_video_projects_each_queue_target_and_preserves_shared_snapsh
         assert payload['options'] == ({'copyright': '1', 'tid': '171'} if payload['platform_id'] == 'bilibili' else {})
     saved = service.store.content(service.content_row(content['id']))
     snapshot = json.loads(service.store.one('SELECT snapshot FROM batches WHERE id=?', (batch['id'],))['snapshot'])
+    assert snapshot.pop('accountVideoOptions') == {
+        account['id']: {'copyright': '1', 'tid': '171'} if account['platformId'] == 'bilibili' else {}
+        for account in accounts
+    }
     assert snapshot == original and content == original
     assert {key: value for key, value in saved.items() if key != 'platformPublicationStates'} == {
         key: value for key, value in original.items() if key != 'platformPublicationStates'}

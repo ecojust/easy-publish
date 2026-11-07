@@ -36,7 +36,7 @@
     {"id": "forest", "name": "森林来信", "description": "浅绿纸面、圆角边框与柔和强调，适合自然和人文", "accent": "#2f6b4f"},
     {"id": "artdeco", "name": "黑金画报", "description": "黑金标题带、几何边框与高对比引用，适合专题策划", "accent": "#b7791f"},
   ];
-  const account = (id, platformId, label, status = "ready") => ({ id, platformId, label, status, defaultSelected: true, ...(platformId === "wechat" ? { wechatTemplateId: "clean" } : {}), message: status === "ready" ? "已连接（浏览器测试替身）" : "请连接测试账号", updatedAt: date, credentialConfigured: platformId === "wechat", ...(platformId === "bilibili" ? { bilibiliCategories: status === "ready" ? clone(bilibiliCategories) : [] } : {}) });
+  const account = (id, platformId, label, status = "ready") => ({ id, platformId, label, status, defaultSelected: true, ...(platformId === "wechat" ? { wechatTemplateId: "clean" } : {}), message: status === "ready" ? "已连接（浏览器测试替身）" : "请连接测试账号", updatedAt: date, credentialConfigured: platformId === "wechat", ...(["douyin", "kuaishou", "xiaohongshu", "channels", "bilibili"].includes(platformId) ? { videoOptions: null } : {}), ...(platformId === "bilibili" ? { bilibiliCategories: status === "ready" ? clone(bilibiliCategories) : [] } : {}) });
   const draft = (id, kind, title, body) => ({ id, kind, title, body, inputFormat: "markdown", sourceText: "", formatReady: !!body, formatModel: null, description: "", tags: [], author: "", videoAssetId: null, coverAssetId: null, imageAssetIds: [], platformOptions: {}, articleTemplateId: "clean", platformPublicationStates: {}, createdAt: date, updatedAt: date, revision: 1 });
   const state = {
     platforms, articleTemplates,
@@ -46,7 +46,20 @@
     batches: [],
     runtime: { browserReady: true, browserInstalling: false, browserMessage: "测试浏览器已就绪", vaultReady: true, vaultMessage: "测试凭据库已就绪", version: "0.1.8" },
   };
+  // Initial ready account represents previously configured preferences; new accounts start unset.
+  state.accounts.find((item) => item.id === "a-bilibili").videoOptions = { copyright: "1", tid: "101" };
   const assets = {};
+  const snapshots = {};
+  const videoOptions = (content, account) => {
+    const allowed = new Set(platforms.find((item) => item.id === account.platformId).fields.filter((field) => field.kinds.includes("video")).map((field) => field.key));
+    const filter = (options) => {
+      const selected = Object.fromEntries(Object.entries(options || {}).filter(([key]) => allowed.has(key)));
+      if (account.platformId === "bilibili" && selected.copyright !== "2") delete selected.source;
+      return selected;
+    };
+    const supplied = filter(content.platformOptions?.[account.platformId]);
+    return content.videoOptionsSource !== "account" && Object.keys(supplied).length ? supplied : filter(account.videoOptions);
+  };
   const calls = [];
   let failNextBatch = false;
   let preflightError = false;
@@ -69,7 +82,7 @@
     if (entry.platformId === "bilibili") entry.bilibiliCategories = clone(bilibiliCategories);
   };
   window.__fixture = {
-    state, calls, formatJobs, renderedPreviews: {},
+    state, calls, formatJobs, snapshots, renderedPreviews: {},
     deferFormatting: (value) => { deferFormats = value; },
     failFormatting: (value) => { failFormat = value; },
     finishFormatting: finishFormat,
@@ -155,13 +168,28 @@
         return clone(assets[id]);
       }
       if (method === "GET" && path.startsWith("/api/assets/")) return path.endsWith("/preview") ? { dataUrl: png } : clone(assets[path.split("/").pop()]);
-      if (method === "POST" && path === "/api/preflight") return { ok: !preflightError, targets: body.accountIds.map((accountId) => ({ accountId, errors: preflightError ? ["测试：平台要求添加封面。"] : [], warnings: [] })) };
+      if (method === "POST" && path === "/api/preflight") {
+        const content = state.contents.find((entry) => entry.id === body.contentId);
+        const targets = body.accountIds.map((accountId) => {
+          const account = state.accounts.find((entry) => entry.id === accountId);
+          const errors = preflightError ? ["测试：平台要求添加封面。"] : [];
+          if (content.kind === "video" && account.platformId === "bilibili") {
+            const options = videoOptions(content, account);
+            if (!["1", "2"].includes(options.copyright)) errors.push("请到账号管理设置创作类型");
+            if (!(account.bilibiliCategories || []).some((item) => item.value === options.tid)) errors.push("请到账号管理设置可用的视频分区");
+            if (options.copyright === "2" && !/^https?:\/\//.test(options.source || "")) errors.push("请到账号管理填写转载来源");
+          }
+          return { accountId, errors, warnings: [] };
+        });
+        return { ok: targets.every((target) => target.errors.length === 0), targets };
+      }
       if (method === "POST" && path === "/api/batches") {
         if (failNextBatch) { failNextBatch = false; throw { error: "测试：网络暂时中断，请重试。", code: "fixture_network" }; }
         const existing = state.batches.find((batch) => batch.requestId === body.requestId);
         if (existing) return clone(existing);
         const content = state.contents.find((entry) => entry.id === body.contentId);
         const batch = { id: crypto.randomUUID(), requestId: body.requestId, contentId: content.id, title: content.title, kind: content.kind, mode: body.mode, createdAt: new Date().toISOString(), tasks: body.accountIds.map((id) => { const account = state.accounts.find((item) => item.id === id); return { id: crypto.randomUUID(), accountId: id, accountLabel: account.label, platformId: account.platformId, status: "queued", message: "等待处理（浏览器测试替身）", remoteId: null, url: null, canRetry: false, startedAt: null, finishedAt: null }; }) };
+        snapshots[batch.id] = { ...clone(content), ...(content.kind === "video" ? { accountVideoOptions: Object.fromEntries(body.accountIds.map((id) => [id, videoOptions(content, state.accounts.find((account) => account.id === id))])) } : {}) };
         state.batches.push(batch);
         return clone(batch);
       }
@@ -185,6 +213,7 @@
         const account = state.accounts.find((entry) => entry.id === path.split("/")[3]);
         if ("defaultSelected" in body) account.defaultSelected = body.defaultSelected;
         if ("wechatTemplateId" in body) account.wechatTemplateId = body.wechatTemplateId;
+        if ("videoOptions" in body) account.videoOptions = clone(body.videoOptions);
         return clone(account);
       }
       if (method === "POST" && path.startsWith("/api/accounts/") && path.endsWith("/cancel")) {
