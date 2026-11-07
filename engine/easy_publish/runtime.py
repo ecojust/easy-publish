@@ -263,7 +263,7 @@ class Runtime:
                     self.vault.put(account_id, "session", self._session_bytes(session))
                 except Exception:
                     if operation in {"login", "check"}:
-                        return _result("needs_attention", "平台登录已完成，但加密会话保存失败；请检查系统凭据服务后重新连接")
+                        return _result("needs_attention", "平台登录已完成，但加密会话保存失败；请检查应用数据目录的读写权限后重新连接")
                     # A vault issue cannot invalidate a confirmed publication.
                     await on_event({"event": "progress", "message": "平台结果已确认，但更新登录会话失败；下次使用前请检查账号"})
             return result

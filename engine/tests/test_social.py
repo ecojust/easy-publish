@@ -190,6 +190,7 @@ def test_real_zhihu_main_signals_before_editor_and_clicks_once(tmp_path, monkeyp
     assert [e["event"] for e in events].count("submitting") == 1
     assert launches[0]["executable_path"] == "/owned/chromium"
     assert launches[0]["channel"] == "chromium"
+    assert launches[0]["args"] == ["--password-store=basic", "--use-mock-keychain"]
     assert result.status == ("published" if confirm else "unknown")
 
 

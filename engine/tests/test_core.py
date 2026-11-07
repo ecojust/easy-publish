@@ -34,6 +34,9 @@ class FakeVault:
     def delete(self, account_id):
         self.data = {key: value for key, value in self.data.items() if key[0] != account_id}
 
+    def requires_reconnect(self, account_id, kind):
+        return False
+
 
 class FakeRuntime:
     """An injectable deterministic worker, including controlled mutation fences."""

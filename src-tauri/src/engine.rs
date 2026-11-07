@@ -129,7 +129,7 @@ fn command(data_dir: &Path) -> Result<Command, PublicError> {
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    // Never allow development vault keys to silently disable OS credential protection in a release.
+    // Never allow development keys to replace the application's persistent vault key in a release.
     if !cfg!(debug_assertions) {
         command
             .env_remove("EASY_PUBLISH_TEST_KEY")

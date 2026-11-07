@@ -67,4 +67,4 @@ SOFTWARE.
 
 ## 运行与构建依赖
 
-前端、Rust 宿主和 Python 引擎还分别使用 [package-lock.json](package-lock.json)、[Cargo.lock](src-tauri/Cargo.lock) 与 [requirements.txt](engine/requirements.txt) 中列明的依赖，包括 Tauri、React、Patchright、HTTPX 和系统凭据库等。它们的许可证由对应发行包提供，本文件不替代这些依赖的版权与许可声明。浏览器由用户已有安装或 Patchright 官方安装流程提供，不包含在参考项目的源码副本中。
+前端、Rust 宿主和 Python 引擎还分别使用 [package-lock.json](package-lock.json)、[Cargo.lock](src-tauri/Cargo.lock) 与 [requirements.txt](engine/requirements.txt) 中列明的依赖，包括 Tauri、React、Patchright、HTTPX 和 cryptography 等。它们的许可证由对应发行包提供，本文件不替代这些依赖的版权与许可声明。浏览器由用户已有安装或 Patchright 官方安装流程提供，不包含在参考项目的源码副本中。
