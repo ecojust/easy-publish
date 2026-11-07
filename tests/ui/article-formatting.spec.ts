@@ -7,7 +7,7 @@ test.beforeEach(async ({ page }) => {
   await page.addInitScript({ path: path.resolve("tests/ui/bridge-fixture.js") });
 });
 
-test("plain articles retain one original editor above per-account previews and publish to enabled article accounts", async ({ page }) => {
+test("plain articles retain one original editor with on-demand account previews and publish to enabled article accounts", async ({ page }) => {
   await page.addInitScript(() => {
     const state = (window as any).__fixture.state;
     state.accounts.push({ ...state.accounts[0], id: "second-wechat", label: "生活公众号", wechatTemplateId: "forest" });
@@ -27,19 +27,27 @@ test("plain articles retain one original editor above per-account previews and p
   await expect(page.locator('.article-workspace input[type="checkbox"]')).toHaveCount(0);
   await expect(page.getByRole("button", { name: "发布到已开启账号" })).toBeDisabled();
   expect(await page.evaluate(() => (window as any).__fixture.calls.filter((call: any) => /\/format$/.test(call.path)))).toHaveLength(0);
-  await page.getByRole("button", { name: "整理并预览", exact: true }).click();
+  await page.getByRole("button", { name: "生成", exact: true }).click();
+  await expect(page.getByRole("status").filter({ hasText: "Markdown 已生成" })).toBeVisible();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  expect(await page.evaluate(() => (window as any).__fixture.calls.filter((call: any) => call.path === "/api/preview/article"))).toHaveLength(0);
+  await page.getByRole("button", { name: "预览", exact: true }).click();
   await expect(page.locator(".markdown-preview")).toContainText("整理后的文章");
   await expect(editor).toHaveValue(original);
   await expect(page.locator(".markdown-preview img")).toHaveAttribute("src", /^data:image\/png;base64,/);
   await page.getByRole("tab", { name: /生活公众号/ }).click();
   await expect(page.locator('.markdown-preview [data-template="forest"]')).toBeVisible();
+  expect(await page.evaluate(() => (window as any).__fixture.calls.filter((call: any) => /\/format$/.test(call.path)))).toHaveLength(1);
   await page.setViewportSize({ width: 1280, height: 900 });
   await page.evaluate(() => window.scrollTo(0, 0));
-  await page.screenshot({ path: "test-results/article-workspace-1280.png", fullPage: true });
+  await page.screenshot({ path: "test-results/article-preview-modal-1280.png", fullPage: true });
+  await page.setViewportSize({ width: 1000, height: 900 });
+  await page.screenshot({ path: "test-results/article-preview-modal-1000.png", fullPage: true });
   expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false);
   await page.getByRole("tab", { name: /创作笔记/ }).click();
   await expect(page.locator(".markdown-preview [data-template]")).toHaveCount(0);
-  const bounds = await Promise.all([editor.boundingBox(), page.locator('.article-publishing').boundingBox(), page.getByPlaceholder("作者名称").boundingBox()]);
+  await page.getByRole("dialog", { name: "文章最终预览" }).getByRole("button", { name: "关闭", exact: true }).click();
+  const bounds = await Promise.all([editor.boundingBox(), page.getByRole('region', { name: '文章发布设置', exact: true }).boundingBox(), page.getByPlaceholder("作者名称").boundingBox()]);
   expect(bounds[1]!.y).toBeGreaterThan(bounds[0]!.y + bounds[0]!.height);
   expect(bounds[2]!.y).toBeLessThan(bounds[0]!.y);
   await page.getByLabel("信息来源").selectOption("无需标注");
@@ -58,12 +66,12 @@ test("failed and cancelled formatting preserve the original and never publish", 
   const editor = page.getByRole("textbox", { name: "文章正文" });
   await editor.fill("这段原文必须在失败和取消时完整保留。");
   await page.evaluate(() => (window as any).__fixture.failFormatting(true));
-  await page.getByRole("button", { name: "整理并预览", exact: true }).click();
+  await page.getByRole("button", { name: "生成", exact: true }).click();
   await expect(page.getByRole("alert")).toContainText("原文已保留");
   await expect(editor).toHaveValue("这段原文必须在失败和取消时完整保留。");
   await page.evaluate(() => { (window as any).__fixture.failFormatting(false); (window as any).__fixture.deferFormatting(true); });
-  await page.getByRole("button", { name: "整理并预览", exact: true }).click();
-  await page.getByRole("button", { name: "取消整理", exact: true }).click();
+  await page.getByRole("button", { name: "生成", exact: true }).click();
+  await page.getByRole("button", { name: "取消生成", exact: true }).click();
   await expect(page.getByRole("status").filter({ hasText: "整理已取消" })).toBeVisible();
   await expect(editor).toHaveValue("这段原文必须在失败和取消时完整保留。");
   await expect(page.getByRole("button", { name: "发布到已开启账号" })).toBeDisabled();
@@ -77,8 +85,8 @@ test("format responses cannot overwrite original edits made while a job runs", a
   const editor = page.getByRole("textbox", { name: "文章正文" });
   await editor.fill("整理请求中的原文。");
   await page.evaluate(() => (window as any).__fixture.deferFormatting(true));
-  await page.getByRole("button", { name: "整理并预览", exact: true }).click();
-  await expect(page.getByRole("button", { name: "取消整理", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "生成", exact: true }).click();
+  await expect(page.getByRole("button", { name: "取消生成", exact: true })).toBeVisible();
   await editor.fill("整理期间继续编辑的新原文。");
   await page.evaluate(() => { const f = (window as any).__fixture; f.finishFormatting(Object.keys(f.formatJobs)[0]); });
   await expect(page.getByRole("status").filter({ hasText: "原文有新的修改" })).toBeVisible();
@@ -86,7 +94,9 @@ test("format responses cannot overwrite original edits made while a job runs", a
   await expect(page.locator(".markdown-preview")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "发布到已开启账号" })).toBeDisabled();
   await page.evaluate(() => (window as any).__fixture.deferFormatting(false));
-  await page.getByRole("button", { name: "整理并预览", exact: true }).click();
+  await page.getByRole("button", { name: "生成", exact: true }).click();
+  await expect(page.getByRole("status").filter({ hasText: "Markdown 已生成" })).toBeVisible();
+  await page.getByRole("button", { name: "预览", exact: true }).click();
   await expect(page.locator(".markdown-preview")).toContainText("整理期间继续编辑的新原文。");
 });
 
@@ -104,9 +114,11 @@ test("format start retries retain the original request identity after response a
   await page.getByRole("button", { name: "新建文章", exact: true }).click();
   await page.getByRole("textbox", { name: "文章标题" }).fill("响应丢失恢复");
   await page.getByRole("textbox", { name: "文章正文" }).fill("同一次整理操作不应重复创建任务。");
-  await page.getByRole("button", { name: "整理并预览", exact: true }).click();
+  await page.getByRole("button", { name: "生成", exact: true }).click();
   await expect(page.getByRole("alert")).toContainText("启动响应丢失");
-  await page.getByRole("button", { name: "整理并预览", exact: true }).click();
+  await page.getByRole("button", { name: "生成", exact: true }).click();
+  await expect(page.getByRole("status").filter({ hasText: "Markdown 已生成" })).toBeVisible();
+  await page.getByRole("button", { name: "预览", exact: true }).click();
   await expect(page.locator(".markdown-preview")).toContainText("同一次整理操作");
   const calls = await page.evaluate(() => (window as any).__fixture.calls);
   const starts = calls.filter((call: any) => /\/format$/.test(call.path));
@@ -132,7 +144,9 @@ test("account changes during preflight invalidate delayed results and refresh pr
   await page.getByRole("button", { name: "保存模板", exact: true }).click();
   await expect(page.getByRole("dialog")).toHaveCount(0);
   await page.getByRole("navigation").getByRole("button", { name: "文章", exact: true }).click();
+  await page.getByRole("button", { name: "预览", exact: true }).click();
   await expect(page.locator('.markdown-preview [data-template="artdeco"]')).toBeVisible();
+  await page.getByRole("dialog", { name: "文章最终预览" }).getByRole("button", { name: "关闭", exact: true }).click();
   await page.evaluate(() => (window as any).__releasePreflight());
   await expect(page.getByRole("alert")).toContainText("内容或发布账号已变化");
   await expect(page.getByRole("button", { name: "发布到已开启账号" })).toBeDisabled();
@@ -186,4 +200,44 @@ test("account changes wait for a fresh state after an older poll before returnin
   await expect(page.getByRole("tab", { name: /品牌公众号/ })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "发布到已开启账号" })).toBeDisabled();
   expect(await page.evaluate(() => (window as any).__fixture.state.batches)).toHaveLength(0);
+});
+
+test("article preview is on demand, preserves unsaved text and closes with focus restored", async ({ page }) => {
+  await page.goto("/");
+  const preview = page.getByRole("button", { name: "预览", exact: true });
+  const dialog = page.getByRole("dialog", { name: "文章最终预览", exact: true });
+  const editor = page.getByRole("textbox", { name: "文章正文" });
+  await expect(dialog).toHaveCount(0);
+  await expect(page.locator(".markdown-preview")).toHaveCount(0);
+  expect(await page.evaluate(() => (window as any).__fixture.calls.filter((call: any) => call.path === "/api/preview/article"))).toHaveLength(0);
+  await editor.fill("## 尚未保存的正文\n\n只预览，不保存也不生成。");
+  await preview.click();
+  await expect(dialog).toBeVisible();
+  await expect(dialog.locator(".markdown-preview")).toContainText("尚未保存的正文");
+  await dialog.getByRole("tab", { name: /创作笔记/ }).click();
+  await expect(dialog.locator(".markdown-preview [data-template]")).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
+  await expect(preview).toBeFocused();
+  await expect(editor).toHaveValue("## 尚未保存的正文\n\n只预览，不保存也不生成。");
+  await expect(page.getByText("有未保存修改", { exact: true })).toBeVisible();
+  await preview.click();
+  await expect(dialog).toBeVisible();
+  await page.locator(".modal-backdrop").click({ position: { x: 5, y: 5 } });
+  await expect(dialog).toHaveCount(0);
+  await expect(preview).toBeFocused();
+  const mutations = await page.evaluate(() => (window as any).__fixture.calls.filter((call: any) => call.method !== "GET" && call.path !== "/api/preview/article"));
+  expect(mutations).toHaveLength(0);
+});
+
+test("preview without enabled accounts can navigate to account management and closes the dialog", async ({ page }) => {
+  await page.addInitScript(() => { for (const account of (window as any).__fixture.state.accounts) account.defaultSelected = false; });
+  await page.goto("/");
+  await page.getByRole("button", { name: "预览", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "文章最终预览", exact: true });
+  await expect(dialog).toContainText("暂无本次发布账号");
+  await dialog.getByRole("button", { name: "前往账号管理", exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: /^账号管理/ })).toBeVisible();
+  expect(await page.evaluate(() => (window as any).__fixture.calls.filter((call: any) => /\/format$/.test(call.path) || call.path === "/api/preview/article"))).toHaveLength(0);
 });

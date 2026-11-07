@@ -305,7 +305,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("binary", type=Path)
     parser.add_argument("--timeout", type=int, default=120)
-    parser.add_argument("--expected-version", default="0.1.6")
+    parser.add_argument("--expected-version", default="0.1.7")
     parser.add_argument("--clean-environment", action="store_true", help="Use a minimal macOS application environment without developer runtime paths")
     args = parser.parse_args()
     try:

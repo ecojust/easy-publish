@@ -39,15 +39,15 @@ export function EmptyState({ icon, title, children, action }: { icon: ReactNode;
   return <div className="empty-state"><div className="empty-icon">{icon}</div><h3>{title}</h3><p>{children}</p>{action}</div>;
 }
 
-export function Modal({ title, children, onClose, busy = false }: { title: string; children: ReactNode; onClose: () => void; busy?: boolean }) {
+export function Modal({ title, children, onClose, busy = false, className = "" }: { title: string; children: ReactNode; onClose: () => void; busy?: boolean; className?: string }) {
   const dialog = useRef<HTMLElement>(null);
   useEffect(() => {
     const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     dialog.current?.querySelector<HTMLElement>("button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled)")?.focus();
     return () => previous?.focus();
   }, []);
-  return <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) onClose(); }}>
-    <section ref={dialog} className="modal" role="dialog" aria-modal="true" aria-label={title} tabIndex={-1} onKeyDown={(event) => {
+  return <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) { event.preventDefault(); onClose(); } }}>
+    <section ref={dialog} className={`modal ${className}`.trim()} role="dialog" aria-modal="true" aria-label={title} tabIndex={-1} onKeyDown={(event) => {
       if (event.key === "Escape" && !busy) onClose();
       if (event.key === "Tab") {
         const focusable = [...(dialog.current?.querySelectorAll<HTMLElement>("button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href]") || [])];
