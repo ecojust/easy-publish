@@ -9,11 +9,12 @@ from urllib.parse import urlsplit
 
 from easy_publish.article_formatting import ArticleFormattingMixin, format_ready, saved_article_input
 from easy_publish.catalog import BY_ID, PLATFORMS, bilibili_categories
-from easy_publish.article_templates import TEMPLATE_IDS, article_format_notes
-from easy_publish.content import ContentInput, image_sources, render_article
-from easy_publish.target_projection import project_content
+from easy_publish.article_templates import TEMPLATE_IDS, WENYAN_TEMPLATE_IDS, article_format_notes
+from easy_publish.content import ContentInput, image_sources, markdown_html, render_article
+from easy_publish.target_projection import project_content, target_options
 from easy_publish.store import Store, dump, now, uid
 from easy_publish.vault import VaultError
+from easy_publish.wenyan_runtime import WenyanError, WenyanRenderer
 
 
 _UNSET = object()
@@ -40,6 +41,7 @@ class Service(ArticleFormattingMixin):
         self.queue_task = None
         self.closing = False
         self._init_formatting(formatter)
+        self.wenyan = WenyanRenderer()
 
     async def start(self):
         self.store.recover()
@@ -68,6 +70,7 @@ class Service(ArticleFormattingMixin):
     async def close(self):
         self.closing = True
         await self.close_formatting()
+        await self.wenyan.close()
         await self.runtime.shutdown()
         for task in [self.queue_task, *self.jobs.values()]:
             if task and not task.cancelling():
@@ -142,11 +145,14 @@ class Service(ArticleFormattingMixin):
             raise Problem("浏览器账号不接受应用密钥")
         self.store.execute("INSERT INTO accounts VALUES (?,?,?,?,?,?,?)",
                            (identifier, platform_id, label.strip(), "login_required", "请连接账号", now(), int(platform["auth"] == "wechat_api")))
+        if platform_id == "wechat":
+            self.store.execute("INSERT INTO account_preferences(account_id,default_selected,wechat_template_id) VALUES (?,1,?)",
+                               (identifier, "wenyan-default"))
         return self.store.account(self.account_row(identifier))
 
-    def set_account_preferences(self, identifier, default_selected=_UNSET, wechat_template_id=_UNSET):
+    def set_account_preferences(self, identifier, default_selected=_UNSET, wechat_template_id=_UNSET, video_options=_UNSET):
         account = self.account_row(identifier)
-        if default_selected is _UNSET and wechat_template_id is _UNSET:
+        if default_selected is _UNSET and wechat_template_id is _UNSET and video_options is _UNSET:
             raise Problem("请提供需要修改的账号设置")
         if default_selected is not _UNSET and type(default_selected) is not bool:
             raise Problem("默认选择设置必须为开或关")
@@ -155,15 +161,67 @@ class Service(ArticleFormattingMixin):
                 raise Problem("只有微信公众号账号可以设置公众号模板", "template_account_mismatch")
             if not isinstance(wechat_template_id, str) or wechat_template_id not in TEMPLATE_IDS:
                 raise Problem("公众号模板不存在，请重新选择")
+        if video_options is not _UNSET:
+            platform = BY_ID[account["platform"]]
+            if "video" not in platform["kinds"]:
+                raise Problem("只有视频账号可以设置视频发布选项", "video_options_account_mismatch")
+            fields = {field["key"]: field for field in platform["fields"] if "video" in field["kinds"]}
+            if not isinstance(video_options, dict) or len(video_options) > 10 or any(
+                not isinstance(key, str) or key not in fields or not isinstance(value, str) or len(value) > 2000
+                for key, value in video_options.items()
+            ):
+                raise Problem("视频设置包含此账号不支持的字段或字段过长", "invalid_video_options")
+            # Partial preferences are drafts. Required/conditional fields are
+            # checked before publication; saving does not assert originality.
+            for key, value in video_options.items():
+                field = fields[key]
+                if value and field.get("choices") and value not in {choice["value"] for choice in field["choices"]}:
+                    raise Problem(f"{field['label']}的选项无效", "invalid_video_options")
+                if value and field.get("dynamicChoices") == "bilibiliCategories" and value not in {choice["value"] for choice in self.store.account_categories(identifier)}:
+                    raise Problem("视频分区不在此账号的可用分区中，请重新验证账号并选择分区", "invalid_video_options")
         with self.store.transaction() as db:
             selected = self.store.account_default_selected(identifier) if default_selected is _UNSET else default_selected
             template = self.store.account_wechat_template(identifier) if wechat_template_id is _UNSET else wechat_template_id
-            db.execute("INSERT INTO account_preferences(account_id,default_selected,wechat_template_id) VALUES (?,?,?) "
-                       "ON CONFLICT(account_id) DO UPDATE SET default_selected=excluded.default_selected,wechat_template_id=excluded.wechat_template_id",
-                       (identifier, int(selected), template))
+            options = self.store.account_video_options(identifier) if video_options is _UNSET else video_options
+            db.execute("INSERT INTO account_preferences(account_id,default_selected,wechat_template_id,video_options) VALUES (?,?,?,?) "
+                       "ON CONFLICT(account_id) DO UPDATE SET default_selected=excluded.default_selected,wechat_template_id=excluded.wechat_template_id,video_options=excluded.video_options",
+                       (identifier, int(selected), template, dump(options) if options is not None else None))
         return self.store.account(account)
 
-    def preview_article(self, body, template="clean", platform=None, account_id=None):
+    def _video_options(self, content, identifier, platform_id, *, frozen=False):
+        if "accountVideoOptions" in content:
+            mapping = content["accountVideoOptions"]
+            options = mapping.get(identifier) if isinstance(mapping, dict) else None
+            if not isinstance(options, dict) or len(options) > 10 or any(
+                not isinstance(key, str) or not isinstance(value, str) or len(key) > 100 or len(value) > 2000
+                for key, value in options.items()
+            ):
+                raise Problem("账号视频设置快照无效，请重新创建发布任务", "invalid_video_options_snapshot")
+            return target_options(platform_id, options, "video")
+        previous = target_options(platform_id, content.get("platformOptions", {}).get(platform_id, {}), "video")
+        # A task created before account settings existed must never consult the
+        # live account. This includes retrying a task after preferences changed.
+        if frozen:
+            return previous
+        if content.get("videoOptionsSource", "content") == "content" and previous:
+            return previous
+        return target_options(platform_id, self.store.account_video_options(identifier) or {}, "video")
+
+    def _account_content(self, content, identifier, platform_id, *, frozen=False):
+        selected = project_content(content, platform_id)
+        if content["kind"] == "video":
+            selected["platformOptions"] = {platform_id: self._video_options(content, identifier, platform_id, frozen=frozen)}
+        return selected
+
+    async def _render_article(self, body, template, platform):
+        if template in WENYAN_TEMPLATE_IDS and platform in {None, "wechat"}:
+            try:
+                return await self.wenyan.render(body, template.removeprefix("wenyan-"))
+            except WenyanError as error:
+                raise Problem(str(error), "article_render_failed", 503) from None
+        return render_article(body, template, platform)
+
+    async def preview_article(self, body, template="clean", platform=None, account_id=None):
         if account_id is not None:
             account = self.account_row(account_id)
             if account["platform"] != "wechat" or platform not in {None, "wechat"}:
@@ -173,7 +231,7 @@ class Service(ArticleFormattingMixin):
             raise Problem("请选择支持文章的平台")
         if template not in TEMPLATE_IDS:
             raise Problem("文章模板不存在，请重新选择")
-        return {"html": render_article(body, template, platform), "notes": article_format_notes(platform)}
+        return {"html": await self._render_article(body, template, platform), "notes": article_format_notes(platform)}
 
     def delete_account(self, identifier):
         self.account_row(identifier)
@@ -260,7 +318,7 @@ class Service(ArticleFormattingMixin):
         finally:
             self.jobs.pop(identifier, None)
 
-    def preflight(self, content, account_ids, mode):
+    def preflight(self, content, account_ids, mode, *, frozen=False):
         if not account_ids:
             raise Problem("请选择至少一个发布账号")
         targets = []
@@ -283,11 +341,15 @@ class Service(ArticleFormattingMixin):
                 errors.append("账号已被移除")
             else:
                 platform = BY_ID[account["platform"]]
-                content = project_content(shared_content, platform["id"])
+                content = self._account_content(shared_content, identifier, platform["id"], frozen=frozen)
+                account_video_settings = content["kind"] == "video" and not frozen and (
+                    shared_content.get("videoOptionsSource", "content") == "account"
+                    or not target_options(platform["id"], shared_content.get("platformOptions", {}).get(platform["id"], {}), "video")
+                )
                 ids = [(content.get("videoAssetId"), "video"), (content.get("coverAssetId"), "image")]
                 ids += [(i, "image") for i in content["imageAssetIds"]]
                 if content["kind"] == "article":
-                    for source in image_sources(render_article(content["body"])):
+                    for source in image_sources(markdown_html(content["body"])):
                         if not source.startswith("easy-asset://"):
                             errors.append("正文图片需导入素材库后插入，不支持外部图片地址")
                         else:
@@ -335,9 +397,11 @@ class Service(ArticleFormattingMixin):
                     errors.extend(metadata_errors(content["title"], content["description"], content["tags"]))
                     warnings.append("快手会将标题、描述与话题合并为作品描述；提交后仍需平台审核")
                 for field in platform["fields"]:
+                    if content["kind"] not in field["kinds"]:
+                        continue
                     value = options.get(field["key"], "")
                     if field["required"] and not value:
-                        errors.append(f"请填写{field['label']}")
+                        errors.append(f"请{'在账号管理中' if account_video_settings else ''}填写{field['label']}")
                     elif value and field.get("choices") and value not in {c["value"] for c in field["choices"]}:
                         errors.append(f"{field['label']}的选项无效")
                     elif value and field.get("dynamicChoices") == "bilibiliCategories" and value not in {c["value"] for c in self.store.account_categories(identifier)}:
@@ -360,7 +424,7 @@ class Service(ArticleFormattingMixin):
                     except ValueError:
                         valid_source = False
                     if options.get("copyright") == "2" and not valid_source:
-                        errors.append("转载视频需要填写有效的原始视频链接")
+                        errors.append("转载视频需要填写有效的原始视频链接" + ("，请在账号管理中补充" if account_video_settings else ""))
                     if content["coverAssetId"]:
                         cover = self.store.one("SELECT * FROM assets WHERE id=?", (content["coverAssetId"],))
                         if cover and cover["size"] > 5 * 1024**2:
@@ -389,13 +453,19 @@ class Service(ArticleFormattingMixin):
                 raise Problem("此请求编号已用于不同任务", "idempotency_conflict", 409)
             return self.store.batch(previous)
         content = self.store.content(self.content_row(content_id))
-        check = self.preflight(content, account_ids, mode)
+        snapshot = dict(content)
+        if content["kind"] == "video":
+            snapshot["accountVideoOptions"] = {
+                identifier: self._video_options(content, identifier, account["platform"])
+                for identifier in account_ids
+                if (account := self.store.one("SELECT * FROM accounts WHERE id=?", (identifier,)))
+            }
+        check = self.preflight(snapshot, account_ids, mode)
         if not check["ok"]:
             raise Problem("发布检查未通过：" + "；".join(dict.fromkeys(e for t in check["targets"] for e in t["errors"])), "preflight_failed")
         identifier = uid()
         with self.store.transaction() as db:
             accounts = [self.account_row(account_id) for account_id in account_ids]
-            snapshot = dict(content)
             if content["kind"] == "article":
                 snapshot["accountTemplateIds"] = {
                     account["id"]: self.store.account_wechat_template(account["id"])
@@ -409,8 +479,8 @@ class Service(ArticleFormattingMixin):
         self.wake.set()
         return self.store.batch(self.store.one("SELECT * FROM batches WHERE id=?", (identifier,)))
 
-    def payload(self, content, task, mode):
-        content = project_content(content, task["platform"])
+    async def payload(self, content, task, mode):
+        content = self._account_content(content, task["account_id"], task["platform"], frozen=True)
         template = content.get("articleTemplateId", "clean")
         # New batches freeze each WeChat account's setting. An absent map marks
         # an older batch and must keep its original draft template, even on retry.
@@ -423,9 +493,9 @@ class Service(ArticleFormattingMixin):
             return self.asset_row(identifier)["path"] if identifier else None
         images = set(content["imageAssetIds"])
         if content["kind"] == "article":
-            images |= {s.removeprefix("easy-asset://") for s in image_sources(render_article(content["body"])) if s.startswith("easy-asset://")}
+            images |= {s.removeprefix("easy-asset://") for s in image_sources(markdown_html(content["body"])) if s.startswith("easy-asset://")}
         return {"platform_id": task["platform"], "account_id": task["account_id"], "kind": content["kind"], "mode": mode,
-                "title": content["title"].strip(), "body_html": render_article(content["body"], template, task["platform"]) if content["kind"] == "article" else "",
+                "title": content["title"].strip(), "body_html": await self._render_article(content["body"], template, task["platform"]) if content["kind"] == "article" else "",
                 "description": content["description"], "tags": content["tags"], "author": content["author"],
                 "video_path": asset_path(content["videoAssetId"]), "cover_path": asset_path(content["coverAssetId"]),
                 "images": {i: asset_path(i) for i in images}, "options": content.get("platformOptions", {}).get(task["platform"], {})}
@@ -455,14 +525,16 @@ class Service(ArticleFormattingMixin):
             elif value.get("event") == "progress":
                 self.store.execute("UPDATE tasks SET message=? WHERE id=?", (value.get("message", "正在处理")[:500], identifier))
         try:
-            check = self.preflight(content, [task["account_id"]], batch["mode"])
+            check = self.preflight(content, [task["account_id"]], batch["mode"], frozen=True)
             if not check["ok"]:
                 result = {"status": "failed", "message": "；".join(check["targets"][0]["errors"])}
             else:
-                result = await self.runtime.run("publish", self.payload(content, task, batch["mode"]), event, identifier)
+                result = await self.runtime.run("publish", await self.payload(content, task, batch["mode"]), event, identifier)
         except asyncio.CancelledError:
             self.interrupt_task(identifier)
             raise
+        except Problem as error:
+            result = {"status": "failed", "message": error.message}
         except Exception:
             result = {"status": "failed", "message": "发布引擎未完成，请检查账号和运行环境"}
         current = self.store.one("SELECT * FROM tasks WHERE id=?", (identifier,))
@@ -499,7 +571,7 @@ class Service(ArticleFormattingMixin):
         if not self.store.task(task)["canRetry"]:
             raise Problem("此任务不能直接重试；请先到平台核对结果", "retry_not_allowed", 409)
         batch = self.store.one("SELECT * FROM batches WHERE id=?", (task["batch_id"],))
-        check = self.preflight(json.loads(batch["snapshot"]), [task["account_id"]], batch["mode"])
+        check = self.preflight(json.loads(batch["snapshot"]), [task["account_id"]], batch["mode"], frozen=True)
         if not check["ok"]:
             raise Problem("；".join(check["targets"][0]["errors"]), "preflight_failed")
         self.store.execute("UPDATE tasks SET status='queued',message='等待重试',started=NULL,finished=NULL WHERE id=?", (identifier,))

@@ -126,7 +126,14 @@ def test_real_child_contract_retains_text_and_uses_only_isolated_state(fake_runt
     assert calls[-1]['body']['parts'] == [{'type':'text','text':source}]
     assert calls[-1]['body']['agent'] == runtime.AGENT_ID
     assert calls[-2]['body']['permission'] == [{'permission':'*','pattern':'*','action':'deny'}]
-    assert '【图片1】' in calls[-1]['body']['system']
+    # The managed agent and actual model request must use the same editorial
+    # instructions; user prose is a separate text part, never configuration.
+    prompt = calls[-1]['body']['system']
+    config = json.loads(env['OPENCODE_CONFIG_CONTENT'])
+    assert prompt == config['agent'][runtime.AGENT_ID]['prompt'] == runtime.FORMAT_PROMPT
+    assert all(rule in prompt for rule in ('润色', '修正语病', '段落的衔接', '删去重复', '原意', '直接引用的原话保持不变', '不添加原文没有的信息', '【图片1】'))
+    assert '不要只添加 Markdown 符号而不改善文字' in prompt
+    assert source not in prompt
     assert all(process.returncode is not None for process in children)
     assert list(formatter.root.glob('format-*')) == []
 
@@ -239,7 +246,7 @@ def test_check_returns_busy_promptly_during_active_conversion(fake_runtime):
                 await asyncio.sleep(.02)
         async with asyncio.timeout(.2):
             state = await formatter.check()
-        assert '正在整理' in state['message'] and len(launches) == 1
+        assert '正在润色' in state['message'] and len(launches) == 1
         await formatter.close()
         with pytest.raises(asyncio.CancelledError):
             await task

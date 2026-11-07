@@ -25,6 +25,7 @@ jobs:
           node-version: "22"
           cache: npm
       - run: npm ci
+      - run: npm run prepare:wenyan
       - run: npm run build
       - name: Check runner browser
         run: /usr/bin/google-chrome --version
@@ -95,8 +96,10 @@ jobs:
           npm ci
           python -m pip install -r engine/requirements-dev.txt pyinstaller==6.22.3 pytest==8.4.2
       - name: Check frontend and engine
-        timeout-minutes: 6
+        timeout-minutes: 10
         run: |
+          npm run prepare:wenyan
+          npm test --prefix runtime/wenyan
           npm run check
           npm run build
           python -m pytest engine/tests -vv -o faulthandler_timeout=45
@@ -139,7 +142,7 @@ jobs:
       - name: Upload desktop artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: easy-publish-0.1.7-${{ matrix.artifact }}
+          name: easy-publish-0.1.8-${{ matrix.artifact }}
           path: |
             src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg
             src-tauri/target/${{ matrix.target }}/release/bundle/nsis/*-setup.exe

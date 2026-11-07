@@ -136,6 +136,9 @@ def check_mcp(binary: Path, environment: dict[str, str], directory: Path, port: 
         preview = tool(5, "preview_article", {"body": saved["body"], "articleTemplateId": "journal", "platformId": "wechat"})
         if "中文文章" not in preview.get("html", "") or "style=" not in preview["html"]:
             raise RuntimeError("Frozen MCP article formatting failed")
+        wenyan = tool(6, "preview_article", {"body": saved["body"], "articleTemplateId": "wenyan-phycat", "platformId": "wechat"})
+        if "中文文章" not in wenyan.get("html", "") or 'data-provider="WenYan"' not in wenyan["html"] or "style=" not in wenyan["html"]:
+            raise RuntimeError("Frozen MCP Wenyan rendering failed")
         status, deleted = request(port, f"/api/contents/{saved['id']}", token, "DELETE")
         if status != 200 or not deleted.get("ok"):
             raise RuntimeError("MCP smoke draft cleanup failed")
@@ -305,7 +308,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("binary", type=Path)
     parser.add_argument("--timeout", type=int, default=120)
-    parser.add_argument("--expected-version", default="0.1.7")
+    parser.add_argument("--expected-version", default="0.1.8")
     parser.add_argument("--clean-environment", action="store_true", help="Use a minimal macOS application environment without developer runtime paths")
     args = parser.parse_args()
     try:

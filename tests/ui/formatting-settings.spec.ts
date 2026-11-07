@@ -27,7 +27,7 @@ test("formatting settings check the free model only on request and keep other se
   });
   await page.goto("/");
   await page.getByRole("button", { name: "设置", exact: true }).click();
-  const section = page.getByRole("region", { name: "文章智能整理", exact: true });
+  const section = page.getByRole("region", { name: "文章智能润色", exact: true });
   await expect(section).toContainText("待检查免费模型");
   await expect(section).toContainText("内置 OpenCode v1.2.3-fixture");
   await expect(section).toContainText("模型：测试免费模型");
@@ -62,7 +62,7 @@ test("missing bundled formatting engine shows its status without asking for cred
   });
   await page.goto("/");
   await page.getByRole("button", { name: "设置", exact: true }).click();
-  const section = page.getByRole("region", { name: "文章智能整理", exact: true });
+  const section = page.getByRole("region", { name: "文章智能润色", exact: true });
   await expect(section).toContainText("内置引擎未就绪");
   await expect(section).toContainText("未找到内置排版引擎，请安装完整版本");
   await expect(section).toContainText("模型：尚未确认");
@@ -89,7 +89,7 @@ test("free model check failure stays in its section and can be retried", async (
   });
   await page.goto("/");
   await page.getByRole("button", { name: "设置", exact: true }).click();
-  const section = page.getByRole("region", { name: "文章智能整理", exact: true });
+  const section = page.getByRole("region", { name: "文章智能润色", exact: true });
   await section.getByRole("button", { name: "检查免费模型", exact: true }).click();
   await expect(section.getByRole("alert")).toContainText("免费模型目录暂时不可用");
   await expect(section.getByRole("button", { name: "检查免费模型", exact: true })).toBeEnabled();
@@ -123,7 +123,7 @@ test("a busy check response stays visible when refreshed global state has a diff
   });
   await page.goto("/");
   await page.getByRole("button", { name: "设置", exact: true }).click();
-  const section = page.getByRole("region", { name: "文章智能整理", exact: true });
+  const section = page.getByRole("region", { name: "文章智能润色", exact: true });
   await section.getByRole("button", { name: "检查免费模型", exact: true }).click();
   await expect.poll(() => page.evaluate(() => (window as any).__stateReadsAfterBusyCheck)).toBeGreaterThan(0);
   await expect(section.getByRole("status")).toContainText("最近检查：正在整理文章，完成后可检查免费模型。");

@@ -1,12 +1,13 @@
 {
   "name": "easy-publish",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "build": "tsc --noEmit && vite build",
     "check": "tsc --noEmit",
+    "prepare:wenyan": "npm ci --prefix runtime/wenyan --ignore-scripts && npm run build --prefix runtime/wenyan",
     "test:ui": "playwright test",
     "preview": "vite preview --host 127.0.0.1",
     "tauri": "tauri",

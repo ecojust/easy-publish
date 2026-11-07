@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { ArrowUpRight, Check, ExternalLink, FileText, Film, KeyRound, Link2, Plus, RefreshCw, ShieldCheck, Trash2, Users, X } from "lucide-react";
+import { ArrowUpRight, Check, ExternalLink, FileText, Film, KeyRound, Link2, Plus, RefreshCw, Settings2, ShieldCheck, Trash2, Users, X } from "lucide-react";
 import { bridge, errorMessage, request } from "./api";
 import { ArticleTemplateThumbnail } from "./MarkdownPreview";
 import { AccountBadge, dateLabel, EmptyState, InlineError, Modal, PlatformMark, Spinner } from "./ui";
@@ -15,6 +15,15 @@ interface Props {
   onSettings: () => void;
 }
 
+function videoSettingsSummary(account: Account, platform: Platform) {
+  const options = account.videoOptions || {};
+  const fields = platform.fields.filter((field) => field.kinds.includes("video"));
+  if (!Object.keys(options).length) return "待设置";
+  if (fields.some((field) => field.required && !options[field.key]) || (account.platformId === "bilibili" && options.copyright === "2" && !options.source)) return "待完善";
+  if (fields.some((field) => field.dynamicChoices === "bilibiliCategories" && !(account.bilibiliCategories || []).some((choice) => choice.value === options[field.key]))) return "分区需更新";
+  return "已设置";
+}
+
 export default function AccountsPage({ accounts, articleTemplates, platforms, runtime, onRefresh, onNotice, onSettings }: Props) {
   const [filter, setFilter] = useState<ContentKind | "all">("all");
   const [showAdd, setShowAdd] = useState(false);
@@ -26,10 +35,15 @@ export default function AccountsPage({ accounts, articleTemplates, platforms, ru
   const [busy, setBusy] = useState<string | null>(null);
   const [deleteAccount, setDeleteAccount] = useState<Account | null>(null);
   const [templateAccount, setTemplateAccount] = useState<Account | null>(null);
-  const [templateId, setTemplateId] = useState<ArticleTemplateId>("clean");
+  const [templateId, setTemplateId] = useState<ArticleTemplateId>("wenyan-default");
+  const [videoSettingsAccount, setVideoSettingsAccount] = useState<Account | null>(null);
+  const [videoOptions, setVideoOptions] = useState<Record<string, string>>({});
   const operation = useRef(false);
   const platform = platforms.find((item) => item.id === platformId);
   const displayed = accounts.filter((account) => filter === "all" || platforms.find((item) => item.id === account.platformId)?.kinds.includes(filter));
+  const videoAccount = accounts.find((account) => account.id === videoSettingsAccount?.id) || videoSettingsAccount;
+  const videoPlatform = platforms.find((item) => item.id === videoAccount?.platformId);
+  const videoFields = (videoPlatform?.fields || []).filter((field) => field.kinds.includes("video") && !(videoAccount?.platformId === "bilibili" && field.key === "source" && videoOptions.copyright !== "2"));
 
   async function perform(key: string, action: () => Promise<void>) {
     if (operation.current) return;
@@ -66,7 +80,7 @@ export default function AccountsPage({ accounts, articleTemplates, platforms, ru
 
   return <div className="standard-page">
     <div className="page-heading"><div><div className="eyebrow">YOUR CHANNELS</div><h1>账号管理<span className="heading-count">{accounts.length}</span></h1><p>连接你的创作平台，每个平台可以添加多个账号。</p></div><button className="button primary" onClick={() => { setError(null); setShowAdd(true); }}><Plus size={17} />添加账号</button></div>
-    {!showAdd && !deleteAccount && !templateAccount && <InlineError message={error} />}
+    {!showAdd && !deleteAccount && !templateAccount && !videoSettingsAccount && <InlineError message={error} />}
     {!runtime.browserReady && <div className="setup-banner"><span className="setup-icon"><Link2 size={20} /></span><div><strong>{runtime.browserInstalling ? "正在准备发布浏览器" : "首次使用，准备发布浏览器"}</strong><p>{runtime.browserInstalling ? runtime.browserMessage : "扫码登录和网页发布需要独立浏览器，可以在设置中一键准备。"}</p></div><button className="button small" onClick={onSettings}>前往设置<ArrowUpRight size={14} /></button></div>}
     <div className="list-toolbar"><div className="filter-tabs">{([["all", "全部账号"], ["article", "文章平台"], ["video", "视频平台"]] as const).map(([value, title]) => <button key={value} className={filter === value ? "active" : ""} onClick={() => setFilter(value)}>{title}</button>)}</div><span className="list-count">{accounts.filter((account) => account.status === "ready").length} 个已连接</span></div>
     {displayed.length ? <div className="account-grid">{displayed.map((account) => {
@@ -85,7 +99,8 @@ export default function AccountsPage({ accounts, articleTemplates, platforms, ru
             onNotice(defaultSelected ? "已设为默认发布账号。" : "已关闭此账号的默认发布。");
           });
         }} /></label>
-        {account.platformId === "wechat" && <button className="account-template-button" aria-label={`设置 ${account.label} 文章模板`} disabled={!!busy} onClick={() => { setTemplateAccount(account); setTemplateId(account.wechatTemplateId || "clean"); setError(null); }}><FileText size={14} /><span>文章模板</span><strong>{articleTemplates.find((template) => template.id === (account.wechatTemplateId || "clean"))?.name || "清爽蓝"}</strong><ArrowUpRight size={13} /></button>}
+        {account.platformId === "wechat" && <button className="account-template-button" aria-label={`设置 ${account.label} 文章模板`} disabled={!!busy} onClick={() => { setTemplateAccount(account); setTemplateId(account.wechatTemplateId || "wenyan-default"); setError(null); }}><FileText size={14} /><span>文章模板</span><strong>{articleTemplates.find((template) => template.id === (account.wechatTemplateId || "wenyan-default"))?.name || "默认经典"}</strong><ArrowUpRight size={13} /></button>}
+        {item?.fields.some((field) => field.kinds.includes("video")) && <button className="account-template-button" aria-label={`设置 ${account.label} 视频发布设置`} disabled={!!busy} onClick={() => { setVideoSettingsAccount(account); setVideoOptions({ ...(account.videoOptions || {}) }); setError(null); }}><Settings2 size={14} /><span>视频发布设置</span><strong>{videoSettingsSummary(account, item)}</strong><ArrowUpRight size={13} /></button>}
         <div className="account-card-actions">{account.status === "logging_in" ? <button className="button small" disabled={!!busy} onClick={() => perform(`cancel:${account.id}`, async () => { await request("POST", `/api/accounts/${account.id}/cancel`); await onRefresh(); onNotice("连接操作已结束。"); })}>{busy === `cancel:${account.id}` ? <Spinner size={14} /> : <X size={14} />}取消连接</button> : <button className={`button small ${account.status !== "ready" ? "primary" : ""}`} disabled={!!busy || (item?.auth === "browser" && !runtime.browserReady)} onClick={() => perform(`login:${account.id}`, async () => { await request("POST", `/api/accounts/${account.id}/login`); await onRefresh(); onNotice(item?.auth === "wechat_api" ? "已开始检查公众号连接。" : "正在检查应用保存的会话，需要登录时会打开浏览器。"); })}>{busy === `login:${account.id}` ? <Spinner size={14} /> : <Link2 size={14} />}{account.status === "ready" ? "重新连接" : item?.auth === "wechat_api" ? "检查连接" : "登录账号"}</button>}
           <div><button className="icon-button" aria-label={`检查 ${account.label} 连接`} title="检查连接状态" disabled={!!busy || account.status === "logging_in"} onClick={() => perform(`check:${account.id}`, async () => { await request("POST", `/api/accounts/${account.id}/check`); await onRefresh(); onNotice("已请求检查账号状态。"); })}>{busy === `check:${account.id}` ? <Spinner size={15} /> : <RefreshCw size={15} />}</button><button className="icon-button" aria-label={`打开 ${item?.name || "平台"}`} title="打开创作平台" onClick={() => perform(`open:${account.id}`, async () => { if (item) await bridge().openExternal(item.homeUrl); })} disabled={!!busy}><ExternalLink size={15} /></button><button className="icon-button danger-hover" aria-label={`移除账号 ${account.label}`} title="移除本地账号" onClick={() => { setDeleteAccount(account); setError(null); }} disabled={!!busy}><Trash2 size={15} /></button></div>
         </div>
@@ -94,9 +109,32 @@ export default function AccountsPage({ accounts, articleTemplates, platforms, ru
     <div className="privacy-note"><ShieldCheck size={16} /><p>登录会话保存在本机。公众号凭据加密保存，界面不会回显 AppSecret。</p></div>
 
     {templateAccount && <Modal title={`${templateAccount.label} · 文章模板`} onClose={() => setTemplateAccount(null)} busy={!!busy}>
-      <p className="modal-description">为这个公众号选择文章版式，预览与发布会使用相同模板。</p><InlineError message={error} />
+      <p className="modal-description">选择 Wenyan 文章模板，预览与微信公众号发送使用同一份排版。原有模板仍可选择。</p><InlineError message={error} />
       <div className="template-options" role="group" aria-label="公众号文章模板">{articleTemplates.map((template) => <button type="button" key={template.id} className={`template-option ${templateId === template.id ? "selected" : ""}`} aria-pressed={templateId === template.id} disabled={!!busy} onClick={() => setTemplateId(template.id)}><ArticleTemplateThumbnail templateId={template.id} /><span><strong>{template.name}</strong><small>{template.description}</small></span>{templateId === template.id && <Check size={14} />}</button>)}</div>
       <div className="modal-actions"><button className="button" disabled={!!busy} onClick={() => setTemplateAccount(null)}>取消</button><button className="button primary" disabled={!!busy} onClick={() => perform(`template:${templateAccount.id}`, async () => { await request<Account>("PUT", `/api/accounts/${templateAccount.id}/preferences`, { wechatTemplateId: templateId }); await onRefresh(); setTemplateAccount(null); onNotice("公众号模板已保存。"); })}>{busy && <Spinner size={16} />}保存模板</button></div>
+    </Modal>}
+
+    {videoAccount && videoPlatform && <Modal title={`${videoAccount.label} · 视频发布设置`} onClose={() => setVideoSettingsAccount(null)} busy={!!busy}>
+      <form onSubmit={(event) => { event.preventDefault(); void perform(`video-settings:${videoAccount.id}`, async () => {
+        const values = Object.fromEntries(videoPlatform.fields.filter((field) => field.kinds.includes("video")).map((field) => [field.key, (videoOptions[field.key] || "").trim()]).filter(([, value]) => value));
+        await request<Account>("PUT", `/api/accounts/${videoAccount.id}/preferences`, { videoOptions: values });
+        await onRefresh(); setVideoSettingsAccount(null); onNotice("视频发布设置已保存，之后的视频发布会使用此账号的设置。");
+      }); }}>
+        <p className="modal-description">这些设置用于此账号之后的视频发布，每个账号分别设置。可以先保存，未填完整的项目会在发布前检查时提示。</p>
+        <InlineError message={error} />
+        <fieldset className="account-video-fields" disabled={!!busy}>
+          {videoFields.map((field) => {
+            const choices = field.dynamicChoices === "bilibiliCategories" ? videoAccount.bilibiliCategories || [] : field.choices || [];
+            const value = videoOptions[field.key] || "";
+            const invalidChoice = field.type === "select" && !!value && !choices.some((choice) => choice.value === value);
+            const hint = field.dynamicChoices === "bilibiliCategories" ? !choices.length ? "尚未获取此账号的视频分区，请连接或检查此账号。" : invalidChoice ? "原选分区已不可用，请为此账号重新选择。" : "仅显示此账号可用的分区，其他账号可以选择不同分区。" : videoAccount.platformId === "bilibili" && field.key === "source" ? "发布不同的转载视频前，请在这里更新原始视频链接。" : field.hint;
+            const required = field.required || (videoAccount.platformId === "bilibili" && field.key === "source" && videoOptions.copyright === "2");
+            return <label className="field" key={field.key}><span>{field.label}{required && <b className="required-mark">*</b>}</span>{field.type === "select" ? <select value={value} onChange={(event) => { setVideoOptions((current) => ({ ...current, [field.key]: event.target.value })); setError(null); }}><option value="">请选择{field.label}</option>{invalidChoice && <option value={value}>{value}（需重新选择）</option>}{choices.map((choice) => <option key={choice.value} value={choice.value}>{choice.label}</option>)}</select> : <input value={value} onChange={(event) => { setVideoOptions((current) => ({ ...current, [field.key]: event.target.value })); setError(null); }} placeholder={field.hint || field.label} maxLength={2000} />}{hint && <small className="field-hint" role={invalidChoice || (field.dynamicChoices && !choices.length) ? "status" : undefined}>{hint}</small>}</label>;
+          })}
+        </fieldset>
+        {videoFields.some((field) => field.dynamicChoices === "bilibiliCategories") && <button className="text-button account-category-refresh" type="button" disabled={!!busy || videoAccount.status === "logging_in"} onClick={() => perform(`video-refresh:${videoAccount.id}`, async () => { await request("POST", `/api/accounts/${videoAccount.id}/check`); await onRefresh(); onNotice("已请求检查此账号，分区将在检查完成后更新。"); })}><RefreshCw size={13} />检查账号并刷新分区</button>}
+        <div className="modal-actions"><button className="button" type="button" disabled={!!busy} onClick={() => setVideoSettingsAccount(null)}>取消</button><button className="button primary" type="submit" disabled={!!busy}>{busy === `video-settings:${videoAccount.id}` && <Spinner size={16} />}保存视频设置</button></div>
+      </form>
     </Modal>}
 
     {showAdd && <Modal title="添加发布账号" onClose={closeAdd} busy={!!busy}><form onSubmit={(event) => { event.preventDefault(); void addAccount(); }}>

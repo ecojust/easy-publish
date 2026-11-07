@@ -8,7 +8,7 @@ from typing import Literal
 from PIL import Image
 from pydantic import BaseModel, ConfigDict, Field
 
-from easy_publish.article_templates import ArticleTemplateId, render_article
+from easy_publish.article_templates import ArticleTemplateId, markdown_html, render_article
 from easy_publish.store import uid
 
 
@@ -26,6 +26,7 @@ class ContentInput(BaseModel):
     coverAssetId: str | None = None
     imageAssetIds: list[str] = Field(default_factory=list, max_length=100)
     platformOptions: dict[str, dict[str, str]] = Field(default_factory=dict)
+    videoOptionsSource: Literal["account", "content"] = "content"
     articleTemplateId: ArticleTemplateId = "clean"
 
 

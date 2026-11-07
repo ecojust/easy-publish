@@ -81,7 +81,8 @@ def test_old_content_gets_default_template_without_modifying_source(api):
 def test_article_preview_exposes_templates_and_platform_specific_safe_html(api):
     client, _, _ = api
     state = client.get("/api/state").json()
-    assert {item["id"] for item in state["articleTemplates"]} == {"clean", "editorial", "journal", "tech", "forest", "artdeco"}
+    from easy_publish.article_templates import TEMPLATE_IDS
+    assert {item["id"] for item in state["articleTemplates"]} == TEMPLATE_IDS
     rendered = []
     for template in state["articleTemplates"]:
         response = client.post("/api/preview/article", json={"body": "## 标题\n\n正文 **重点**\n\n> 引用", "articleTemplateId": template["id"], "platformId": "wechat"})
@@ -90,7 +91,7 @@ def test_article_preview_exposes_templates_and_platform_specific_safe_html(api):
         assert "重点" in value["html"] and "style=" in value["html"]
         assert isinstance(value["notes"], list)
         rendered.append(value["html"])
-    assert len(set(rendered)) == 6
+    assert len(set(rendered)) == len(TEMPLATE_IDS)
     source = "## 标题\n\n<script>alert(1)</script>\n\n[bad](javascript:alert(1))"
     for platform in ("wechat", "zhihu", "dayu", "xueqiu"):
         response = client.post("/api/preview/article", json={"body": source, "articleTemplateId": "journal", "platformId": platform})

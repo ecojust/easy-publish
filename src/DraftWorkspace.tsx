@@ -4,18 +4,12 @@ import { bridge, errorMessage, request } from "./api";
 import { AssetImage, useAssetMetadata } from "./MarkdownPreview";
 import ArticleWorkspace from "./ArticleWorkspace";
 import { byteLabel, dateLabel, InlineError, Modal, PlatformMark, Spinner } from "./ui";
-import type { Account, ArticleTemplate, Asset, Batch, Content, ContentInput, ContentKind, FormattingState, Platform, PlatformField, Preflight, PublishMode } from "./shared/types";
+import type { Account, ArticleTemplate, Asset, Batch, Content, ContentInput, ContentKind, FormattingState, Platform, Preflight, PublishMode } from "./shared/types";
 
-const newContent = (kind: ContentKind): ContentInput => ({ kind, inputFormat: "markdown", sourceText: "", title: "", body: "", description: "", tags: [], author: "", videoAssetId: null, coverAssetId: null, imageAssetIds: [], platformOptions: {}, articleTemplateId: "clean" });
-const asInput = (content: Content): ContentInput => ({ kind: content.kind, inputFormat: content.inputFormat || "markdown", sourceText: content.sourceText || "", title: content.title, body: content.body, description: content.description, tags: content.tags, author: content.author, videoAssetId: content.videoAssetId, coverAssetId: content.coverAssetId, imageAssetIds: content.imageAssetIds, platformOptions: content.platformOptions || {}, articleTemplateId: content.articleTemplateId || "clean" });
+const newContent = (kind: ContentKind): ContentInput => ({ kind, videoOptionsSource: "account", inputFormat: "markdown", sourceText: "", title: "", body: "", description: "", tags: [], author: "", videoAssetId: null, coverAssetId: null, imageAssetIds: [], platformOptions: {}, articleTemplateId: "clean" });
+const asInput = (content: Content): ContentInput => ({ kind: content.kind, videoOptionsSource: "account", inputFormat: content.inputFormat || "markdown", sourceText: content.sourceText || "", title: content.title, body: content.body, description: content.description, tags: content.tags, author: content.author, videoAssetId: content.videoAssetId, coverAssetId: content.coverAssetId, imageAssetIds: content.imageAssetIds, platformOptions: content.platformOptions || {}, articleTemplateId: content.articleTemplateId || "clean" });
 
 const publicationLabels = { submitted: "此前已提交", published: "此前已发布", unknown: "结果待确认" };
-
-function choicesFor(field: PlatformField, accounts: Account[]) {
-  if (field.dynamicChoices !== "bilibiliCategories") return field.choices || [];
-  const categories = accounts.map((account) => account.bilibiliCategories || []);
-  return (categories[0] || []).filter((choice) => categories.every((items) => items.some((item) => item.value === choice.value)));
-}
 
 interface Props {
   kind: ContentKind;
@@ -65,8 +59,8 @@ function VideoWorkspace({ kind, contents, platforms, accounts, onRefresh, onAcco
   const enabled = accounts.filter((account) => account.defaultSelected !== false && account.status === "ready" && kindPlatforms.some((platform) => platform.id === account.platformId && platform.modes.includes(mode)));
   const targets = enabled.filter((account) => !publicationStates[account.platformId] || repeatIds.includes(account.id));
   const previous = enabled.filter((account) => !!publicationStates[account.platformId] && !repeatIds.includes(account.id));
-  const selectedPlatforms = kindPlatforms.filter((platform) => targets.some((account) => account.platformId === platform.id));
-  const targetKey = targets.map((account) => account.id).sort().join(",");
+  const targetKey = JSON.stringify(targets.map((account) => ({ id: account.id, options: Object.entries(account.videoOptions || {}).sort(([a], [b]) => a.localeCompare(b)) })).sort((a, b) => a.id.localeCompare(b.id)));
+  const legacyVideoSettings = current?.videoOptionsSource !== "account" && kindPlatforms.some((platform) => (platform.fields || []).some((field) => field.kinds.includes("video") && current?.platformOptions?.[platform.id]?.[field.key]));
   const categoryAvailability = JSON.stringify(targets.filter((account) => account.bilibiliCategories).map((account) => ({ id: account.id, categories: account.bilibiliCategories?.map((choice) => choice.value).sort() })).sort((a, b) => a.id.localeCompare(b.id)));
   const signature = JSON.stringify({ contentId, form, targetKey, mode, categoryAvailability });
   const signatureRef = useRef(signature); signatureRef.current = signature;
@@ -147,7 +141,7 @@ function VideoWorkspace({ kind, contents, platforms, accounts, onRefresh, onAcco
       const saved = await persist();
       const expected = JSON.stringify({ contentId: saved.id, form: asInput(saved), targetKey, mode, categoryAvailability });
       const result = await request<Preflight>("POST", "/api/preflight", { contentId: saved.id, accountIds, mode });
-      if (signatureRef.current !== expected) throw new Error("内容或发布账号已变化，请重新检查。");
+      if (signatureRef.current !== expected) throw new Error("内容或发布账号已变化（含账号视频设置），请重新检查。");
       setCheckedContent(saved.id);
       checkedSignature.current = expected;
       setPreflight(result);
@@ -222,20 +216,7 @@ function VideoWorkspace({ kind, contents, platforms, accounts, onRefresh, onAcco
         <div className="article-publish-mode"><div className="segmented-control"><button className={mode === "publish" ? "active" : ""} onClick={() => setMode("publish")} disabled={!!busy}>发布内容</button><button className={mode === "draft" ? "active" : ""} onClick={() => setMode("draft")} disabled={!!busy}>平台草稿</button></div></div>
         {previous.length > 0 && <div className="article-history video-history">{previous.map((account) => <div key={account.id}><span>{account.label} · {publicationLabels[publicationStates[account.platformId]]}</span><button className="text-button" disabled={!!busy} onClick={() => setRepeatIds((ids) => [...ids, account.id])}>加入本次再次发布</button></div>)}</div>}
         {targets.length > 0 ? <div className="video-targets" aria-label="本次视频发布账号">{targets.map((account) => <div key={account.id} className="video-target-summary"><PlatformMark platform={platforms.find((platform) => platform.id === account.platformId)} size="small" /><span><strong>{account.label}</strong><small>{platforms.find((platform) => platform.id === account.platformId)?.name}{repeatIds.includes(account.id) ? " · 再次发布" : ""}</small></span>{repeatIds.includes(account.id) && <button className="text-button" disabled={!!busy} onClick={() => setRepeatIds((ids) => ids.filter((id) => id !== account.id))}>取消再次发布</button>}</div>)}</div> : <div className="article-preview-empty"><Send size={28} /><strong>暂无本次发布账号</strong><p>在账号管理开启支持{mode === "draft" ? "平台草稿" : "视频发布"}的已连接账号。</p><button className="button small" onClick={onAccounts}>前往账号管理</button></div>}
-        {selectedPlatforms.map((platform) => {
-          const fields = (platform.fields || []).filter((field) => field.kinds.includes(kind));
-          const targetAccounts = targets.filter((account) => account.platformId === platform.id);
-          return fields.length > 0 && <div className="platform-options" key={platform.id}><h3>{platform.name}设置</h3>{fields.map((field) => {
-            const choices = choicesFor(field, targetAccounts);
-            const value = form.platformOptions[platform.id]?.[field.key] || "";
-            const missingChoices = field.dynamicChoices && !choices.length;
-            const invalidChoice = field.dynamicChoices && value && !choices.some((choice) => choice.value === value);
-            const choiceHint = missingChoices
-              ? targetAccounts.some((account) => !account.bilibiliCategories?.length) ? "连接或验证账号以获取分区。" : "已开启账号没有共同可用的视频分区，请在账号管理调整发布账号。"
-              : invalidChoice ? "原选分区不适用于当前账号，请重新选择。" : null;
-            return <label className="field" key={field.key}><span>{field.label}{field.required && <b className="required-mark">*</b>}</span>{field.type === "select" ? <select disabled={!!busy || !!missingChoices} value={invalidChoice ? "" : value} onChange={(event) => update("platformOptions", { ...form.platformOptions, [platform.id]: { ...form.platformOptions[platform.id], [field.key]: event.target.value } })}><option value="">请选择{field.label}</option>{choices.map((choice) => <option key={choice.value} value={choice.value}>{choice.label}</option>)}</select> : <input disabled={!!busy} value={value} onChange={(event) => update("platformOptions", { ...form.platformOptions, [platform.id]: { ...form.platformOptions[platform.id], [field.key]: event.target.value } })} placeholder={field.hint || field.label} />}{choiceHint && <small className="field-hint" role="status">{choiceHint}</small>}{field.hint && <small className="field-hint">{field.hint}</small>}</label>;
-          })}</div>;
-        })}
+        <div className="video-account-settings-note"><p>视频分区、原创或转载等发布设置在账号管理中设置，每个账号分别使用自己的设置。</p>{legacyVideoSettings && <p>本次使用账号管理中的视频设置，旧稿设置已保留。</p>}<button className="text-button" onClick={onAccounts}>前往账号管理设置<ArrowRight size={13} /></button></div>
         {preflight && <div className={`preflight-result ${preflight.ok ? "passed" : "blocked"}`} role="status"><strong><ShieldCheck size={15} />{preflight.ok ? "发布前检查通过" : "需要完善以下内容"}</strong>{preflight.targets.map((target) => <div key={target.accountId}>{[...target.errors, ...target.warnings].map((message, index) => <p key={index}><b>{accounts.find((account) => account.id === target.accountId)?.label}：</b>{message}</p>)}</div>)}{preflight.ok && !preflight.targets.some((target) => target.warnings.length) && <p>已核对本次账号及平台内容要求。</p>}</div>}
         <div className="article-publication-actions"><span>本次发布到 <strong>{targets.length}</strong> 个账号</span><button className="button check-button" disabled={!!busy || !targets.length} onClick={checkTargets}>{busy === "preflight" ? <Spinner size={16} /> : <CheckCheck size={16} />}检查{mode === "draft" ? "草稿" : "发布"}内容</button><button className="button primary" disabled={!!busy || !preflight?.ok || checkedSignature.current !== signature} onClick={publish}>{busy === "publish" ? <Spinner size={16} /> : mode === "draft" ? <Save size={16} /> : <Send size={16} />}{mode === "draft" ? "保存平台草稿" : "发布到已开启账号"}</button></div>
       </section>

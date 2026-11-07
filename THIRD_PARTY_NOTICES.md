@@ -24,7 +24,7 @@ Easy Publish 使用 [MIT 许可证](LICENSE)。本文件记录直接参考或包
 
 参考 `src/views/skillapps/WechatPublisher.vue`、`WechatPublisherTemplate.js` 与 `src-tauri/addin/skills/wechat-publisher.zip` 中文章、正文图片、封面和公众号草稿的业务流程。该参考实现通过 `draft/add` 创建草稿；这不等于正式发布或向关注者群发。
 
-Easy Publish 的 [微信公众号适配器](engine/easy_publish/providers/wechat.py) 是独立编写的确定性官方 API 实现。它使用 AppID / AppSecret、内存访问令牌、图片上传、草稿与 `freepublish` 发布查询，分别记录草稿、受理和最终结果。文章模板另参考上述 ZIP 中 editorial、paper、forest、artdeco 与 blueprint 的版式方向，由本项目独立生成受控的内联 HTML／CSS；来源和兼容取舍见 [文章模板说明](docs/article-templates.md)。原文整理流程参考 `WechatPublisher.vue` 与 `src/service/shell/opencode.ts` 的本地 OpenCode 调用方式；本项目独立实现受限整理任务、账号模板预览和版本检查。未引入 Wenyan CLI 或运行上游排版脚本，未复制 oDesk 的调度源码、技能包、脚本、配置或任何 token 缓存文件。
+Easy Publish 的 [微信公众号适配器](engine/easy_publish/providers/wechat.py) 是独立编写的确定性官方 API 实现。它使用 AppID / AppSecret、内存访问令牌、图片上传、草稿与 `freepublish` 发布查询，分别记录草稿、受理和最终结果。文章模板另参考上述 ZIP 中 editorial、paper、forest、artdeco 与 blueprint 的版式方向，由本项目独立生成受控的内联 HTML／CSS；来源和兼容取舍见 [文章模板说明](docs/article-templates.md)。原文整理流程参考 `WechatPublisher.vue` 与 `src/service/shell/opencode.ts` 的本地 OpenCode 调用方式；本项目独立实现受限整理任务、账号模板预览和版本检查。0.1.8 起内置 Wenyan CLI 使用的官方核心并调用其八款主题，未运行 oDesk 上游排版脚本，未复制 oDesk 的调度源码、技能包、脚本、配置或任何 token 缓存文件。
 
 ## OpenCode
 
@@ -79,3 +79,11 @@ SOFTWARE.
 ## 运行与构建依赖
 
 前端、Rust 宿主和 Python 引擎还分别使用 [package-lock.json](package-lock.json)、[Cargo.lock](src-tauri/Cargo.lock) 与 [requirements.txt](engine/requirements.txt) 中列明的依赖，包括 Tauri、React、Patchright、HTTPX 和 cryptography 等。它们的许可证由对应发行包提供，本文件不替代这些依赖的版权与许可声明。浏览器由用户已有安装或 Patchright 官方安装流程提供，不包含在参考项目的源码副本中。
+
+## Wenyan
+
+- 官方核心：[@wenyan-md/core 3.0.12](https://github.com/caol64/wenyan-core)，Apache-2.0。
+- 对照的 CLI：[@wenyan-md/cli 2.0.12](https://github.com/caol64/wenyan-cli)，本应用复用其核心，不调用 CLI 发布账号。
+- 固定依赖与运行源码：[runtime/wenyan](runtime/wenyan)。原始许可随生成的运行包一同分发。
+
+预览及微信发送使用官方主题渲染结果；仅原先六款兼容模板继续使用独立实现。Wenyan 排版不联网、不执行用户 HTML 或脚本，也不获取第三方账号凭据。

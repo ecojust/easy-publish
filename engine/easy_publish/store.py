@@ -9,7 +9,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .catalog import bilibili_categories
+from .catalog import BY_ID, bilibili_categories
 from .article_templates import TEMPLATE_IDS
 
 
@@ -33,12 +33,13 @@ class Store:
         self.db.row_factory = sqlite3.Row
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.execute("PRAGMA synchronous=FULL")
+        schema_version = self.db.execute("PRAGMA user_version").fetchone()[0]
         self.db.executescript("""
         CREATE TABLE IF NOT EXISTS contents(id TEXT PRIMARY KEY, data TEXT NOT NULL, created TEXT NOT NULL, updated TEXT NOT NULL, revision INTEGER NOT NULL);
         CREATE TABLE IF NOT EXISTS assets(id TEXT PRIMARY KEY, name TEXT NOT NULL, kind TEXT NOT NULL, size INTEGER NOT NULL, mime TEXT NOT NULL, path TEXT NOT NULL, text TEXT);
         CREATE TABLE IF NOT EXISTS accounts(id TEXT PRIMARY KEY, platform TEXT NOT NULL, label TEXT NOT NULL, status TEXT NOT NULL, message TEXT NOT NULL, updated TEXT NOT NULL, configured INTEGER NOT NULL);
         CREATE TABLE IF NOT EXISTS account_metadata(account_id TEXT PRIMARY KEY, bilibili_categories TEXT NOT NULL);
-        CREATE TABLE IF NOT EXISTS account_preferences(account_id TEXT PRIMARY KEY, default_selected INTEGER NOT NULL DEFAULT 1 CHECK(default_selected IN (0,1)), wechat_template_id TEXT NOT NULL DEFAULT 'clean');
+        CREATE TABLE IF NOT EXISTS account_preferences(account_id TEXT PRIMARY KEY, default_selected INTEGER NOT NULL DEFAULT 1 CHECK(default_selected IN (0,1)), wechat_template_id TEXT NOT NULL DEFAULT 'wenyan-default', video_options TEXT);
         CREATE TABLE IF NOT EXISTS batches(id TEXT PRIMARY KEY, request_id TEXT UNIQUE NOT NULL, content_id TEXT NOT NULL, title TEXT NOT NULL, kind TEXT NOT NULL, mode TEXT NOT NULL, created TEXT NOT NULL, snapshot TEXT NOT NULL, selection TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS tasks(id TEXT PRIMARY KEY, batch_id TEXT NOT NULL, account_id TEXT NOT NULL, account_label TEXT NOT NULL, platform TEXT NOT NULL, status TEXT NOT NULL, message TEXT NOT NULL, remote_id TEXT, url TEXT, fence INTEGER NOT NULL DEFAULT 0, started TEXT, finished TEXT);
         CREATE INDEX IF NOT EXISTS tasks_batch ON tasks(batch_id);
@@ -47,7 +48,13 @@ class Store:
         preference_columns = {row["name"] for row in self.db.execute("PRAGMA table_info(account_preferences)")}
         if "wechat_template_id" not in preference_columns:
             self.db.execute("ALTER TABLE account_preferences ADD COLUMN wechat_template_id TEXT NOT NULL DEFAULT 'clean'")
-        self.db.execute("PRAGMA user_version=4")
+        if "video_options" not in preference_columns:
+            self.db.execute("ALTER TABLE account_preferences ADD COLUMN video_options TEXT")
+        if schema_version < 5:
+            # Upgrade the former default for future submissions only. Frozen
+            # batches keep their original template IDs; other chosen themes stay.
+            self.db.execute("UPDATE account_preferences SET wechat_template_id='wenyan-default' WHERE wechat_template_id='clean' AND account_id IN (SELECT id FROM accounts WHERE platform='wechat')")
+        self.db.execute("PRAGMA user_version=6")
         self.db.commit()
 
     @contextmanager
@@ -85,6 +92,7 @@ class Store:
         data.setdefault("articleTemplateId", "clean")
         data.setdefault("inputFormat", "markdown")
         data.setdefault("sourceText", "")
+        data.setdefault("videoOptionsSource", "content")
         data["formatReady"] = format_ready(data)
         data.setdefault("formatModel", None)
         data.pop("formatSourceHash", None)
@@ -117,6 +125,8 @@ class Store:
             result["bilibiliCategories"] = self.account_categories(row["id"]) if row["status"] == "ready" else []
         if row["platform"] == "wechat":
             result["wechatTemplateId"] = self.account_wechat_template(row["id"])
+        if "video" in BY_ID[row["platform"]]["kinds"]:
+            result["videoOptions"] = self.account_video_options(row["id"])
         return result
 
     def account_default_selected(self, identifier):
@@ -125,8 +135,16 @@ class Store:
 
     def account_wechat_template(self, identifier):
         row = self.one("SELECT wechat_template_id FROM account_preferences WHERE account_id=?", (identifier,))
-        value = row["wechat_template_id"] if row else "clean"
-        return value if value in TEMPLATE_IDS else "clean"
+        value = row["wechat_template_id"] if row else "wenyan-default"
+        return value if value in TEMPLATE_IDS else "wenyan-default"
+
+    def account_video_options(self, identifier):
+        row = self.one("SELECT video_options FROM account_preferences WHERE account_id=?", (identifier,))
+        try:
+            value = json.loads(row["video_options"]) if row and row["video_options"] is not None else None
+            return value if isinstance(value, dict) and all(isinstance(k, str) and isinstance(v, str) for k, v in value.items()) else None
+        except (TypeError, ValueError):
+            return None
 
     @staticmethod
     def asset(row):

@@ -65,15 +65,15 @@ def test_schema_three_migration_preserves_default_selection_and_account_state(tm
         try:
             accounts = {row["id"]: store.account(row) for row in store.all("SELECT * FROM accounts")}
             assert accounts["wechat-old"]["defaultSelected"] is False
-            assert accounts["wechat-old"]["wechatTemplateId"] == "clean"
+            assert accounts["wechat-old"]["wechatTemplateId"] == "wenyan-default"
             assert accounts["wechat-old"]["status"] == "ready"
             assert accounts["wechat-old"]["message"] == "Saved connection"
             assert all(account["updatedAt"] == "before" for account in accounts.values())
-            assert accounts["wechat-default"]["wechatTemplateId"] == "clean"
+            assert accounts["wechat-default"]["wechatTemplateId"] == "wenyan-default"
             assert accounts["wechat-default"]["defaultSelected"] is True
             assert accounts["zhihu-old"]["defaultSelected"] is False
             assert "wechatTemplateId" not in accounts["zhihu-old"]
-            assert store.one("PRAGMA user_version")["user_version"] == 4
+            assert store.one("PRAGMA user_version")["user_version"] == 6
         finally:
             store.close()
 
@@ -85,7 +85,7 @@ def test_partial_preferences_preserve_omitted_fields_across_restart_and_delete(t
     with TestClient(app, headers={"Authorization": "Bearer " + TOKEN}) as client:
         account = wechat_account(client)
         identifier = account["id"]
-        assert account["wechatTemplateId"] == "clean" and account["defaultSelected"] is True
+        assert account["wechatTemplateId"] == "wenyan-default" and account["defaultSelected"] is True
         before = app.state.service.account_row(identifier)
         session = runtime.vault.get(identifier, "session")
         path = f"/api/accounts/{identifier}/preferences"
@@ -277,6 +277,33 @@ def test_invalid_new_snapshot_does_not_fall_back_to_live_preferences(api, templa
     set_template(client, account["id"], "tech")
     content = create_content(client)
     with pytest.raises(Problem):
-        app.state.service.payload({**content, "accountTemplateIds": templates},
-                                  {"account_id": account["id"], "platform": "wechat"}, "publish")
+        asyncio.run(app.state.service.payload({**content, "accountTemplateIds": templates},
+                                  {"account_id": account["id"], "platform": "wechat"}, "publish"))
     assert runtime.publish_calls == []
+
+
+def test_wenyan_default_migration_is_once_and_preserves_explicit_themes_and_snapshots(tmp_path):
+    directory = tmp_path / "migration"
+    store = Store(directory)
+    for identifier, template in (("default", "clean"), ("chosen", "forest")):
+        store.execute("INSERT INTO accounts VALUES (?,?,?,?,?,?,?)",
+                      (identifier, "wechat", identifier, "ready", "connected", "before", 1))
+        store.execute("INSERT INTO account_preferences(account_id,default_selected,wechat_template_id) VALUES (?,?,?)", (identifier, 0, template))
+    frozen = dump({"body": "Saved body", "accountTemplateIds": {"default": "clean"}})
+    store.execute("INSERT INTO batches VALUES (?,?,?,?,?,?,?,?,?)", ("old-batch", "old-request", "content", "title", "article", "publish", "before", frozen, "[]"))
+    store.execute("PRAGMA user_version=4")
+    store.close()
+    store = Store(directory)
+    assert store.account_wechat_template("default") == "wenyan-default"
+    assert store.account_wechat_template("chosen") == "forest"
+    assert store.account_default_selected("default") is False
+    assert store.one("SELECT snapshot FROM batches WHERE id='old-batch'")["snapshot"] == frozen
+    # An explicit choice of the compatibility template after upgrading survives.
+    store.execute("UPDATE account_preferences SET wechat_template_id='clean' WHERE account_id='default'")
+    store.close()
+    store = Store(directory)
+    try:
+        assert store.account_wechat_template("default") == "clean"
+        assert store.one("SELECT snapshot FROM batches WHERE id='old-batch'")["snapshot"] == frozen
+    finally:
+        store.close()

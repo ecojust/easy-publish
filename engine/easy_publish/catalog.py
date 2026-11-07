@@ -61,7 +61,7 @@ PLATFORMS = [
                   "kinds": ["video"], "choices": [{"value": "1", "label": "原创"}, {"value": "2", "label": "转载"}]},
                  {"key": "tid", "label": "视频分区", "type": "select", "required": True,
                   "kinds": ["video"], "dynamicChoices": "bilibiliCategories",
-                  "hint": "连接或验证账号后获取可用分区；多个账号使用共同可选的分区"},
+                  "hint": "连接或验证账号后获取可用分区；每个账号分别设置自己的分区"},
                  {"key": "source", "label": "转载来源", "type": "text", "required": False,
                   "kinds": ["video"], "hint": "转载必填，填写原始视频链接；原创会忽略此字段"}]),
 ]

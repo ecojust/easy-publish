@@ -12,7 +12,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, model_validator
 
-from easy_publish.content import ContentInput, import_asset, preview_asset, render_article
+from easy_publish.content import ContentInput, import_asset, preview_asset
 from easy_publish.article_templates import ArticleTemplateId
 from easy_publish.catalog import BY_ID
 from easy_publish.service import Problem, Service
@@ -32,6 +32,7 @@ class AccountPreferencesInput(Input):
     # The route applies only explicitly supplied fields, preserving the others.
     defaultSelected: StrictBool = True
     wechatTemplateId: ArticleTemplateId = "clean"
+    videoOptions: dict[str, str] = Field(default_factory=dict, max_length=10)
 
     @model_validator(mode="after")
     def require_change(self):
@@ -130,7 +131,7 @@ def create_app(data_dir: Path, token: str, runtime=None, *, formatter=None, mcp_
 
     @app.post("/api/preview/article")
     async def preview_article(value: ArticlePreviewInput):
-        return service.preview_article(value.body, value.articleTemplateId, value.platformId, value.accountId)
+        return await service.preview_article(value.body, value.articleTemplateId, value.platformId, value.accountId)
 
     @app.post("/api/mcp/call")
     async def mcp_call(value: McpCallInput):
@@ -197,7 +198,7 @@ def create_app(data_dir: Path, token: str, runtime=None, *, formatter=None, mcp_
     @app.put("/api/accounts/{identifier}/preferences")
     async def account_preferences(identifier: str, value: AccountPreferencesInput):
         changes = value.model_dump(exclude_unset=True)
-        names = {"defaultSelected": "default_selected", "wechatTemplateId": "wechat_template_id"}
+        names = {"defaultSelected": "default_selected", "wechatTemplateId": "wechat_template_id", "videoOptions": "video_options"}
         return service.set_account_preferences(identifier, **{names[key]: item for key, item in changes.items()})
 
     @app.delete("/api/accounts/{identifier}")

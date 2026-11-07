@@ -1,8 +1,15 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import path from "node:path";
 import MarkdownIt from "markdown-it";
 
 const fixturePath = path.resolve("tests/ui/bridge-fixture.js");
+
+const navigate = (page: Page, label: string) => page.getByRole("navigation").getByRole("button", { name: label, exact: true }).click();
+async function videoSettings(page: Page, label: string) {
+  await navigate(page, "账号管理");
+  await page.getByRole("button", { name: `设置 ${label} 视频发布设置`, exact: true }).click();
+  return page.getByRole("dialog", { name: `${label} · 视频发布设置`, exact: true });
+}
 
 test.beforeEach(async ({ page }) => {
   await page.exposeFunction("__renderMarkdownFixture", (body: string) => new MarkdownIt("commonmark", { html: false, breaks: true }).render(body));
@@ -165,7 +172,7 @@ test("account templates persist and preview without changing the original articl
   await page.getByRole("navigation").getByRole("button", { name: "账号管理", exact: true }).click();
   await page.getByRole("button", { name: "设置 品牌公众号 文章模板" }).click();
   const picker = page.getByRole("group", { name: "公众号文章模板", exact: true });
-  await expect(picker.locator(".template-miniature")).toHaveCount(6);
+  await expect(picker.locator(".template-miniature")).toHaveCount(14);
   for (const name of ["清爽蓝", "墨色杂志", "暖色手记", "理性科技", "森林来信", "黑金画报"]) {
     const choice = picker.getByRole("button", { name: new RegExp(name) });
     await choice.click(); await expect(choice).toHaveAttribute("aria-pressed", "true");
@@ -200,7 +207,7 @@ test("account templates persist and preview without changing the original articl
   expect(result.state.accounts.find((item: any) => item.id === "a-wechat").wechatTemplateId).toBe("artdeco");
   expect(result.state.contents.find((item: any) => item.title === "文章模板工作流").body).toContain("让内容更易读");
   expect(result.calls.filter((call: any) => /\/format$/.test(call.path))).toHaveLength(0);
-  expect(result.calls.filter((call: any) => call.path === "/api/preview/article" && call.body.body.startsWith("# 灵感的形状"))).toHaveLength(6);
+  expect(result.calls.filter((call: any) => call.path === "/api/preview/article" && call.body.body.startsWith("# 灵感的形状"))).toHaveLength(14);
 });
 
 test("engine preview failures can retry and preview markup remains constrained", async ({ page }) => {
@@ -465,10 +472,13 @@ test("Bilibili accounts connect as video-only targets", async ({ page }) => {
   await expect(target).toHaveCount(0);
 });
 
-test("Bilibili video options survive reopening and reach a multi-platform batch", async ({ page }) => {
-  await page.addInitScript((enabled) => { for (const account of (window as any).__fixture.state.accounts) account.defaultSelected = enabled.includes(account.platformId); }, ["bilibili", "xiaohongshu"]);
+test("Bilibili account settings survive reopening and reach a multi-platform batch", async ({ page }) => {
+  await page.addInitScript(() => {
+    for (const account of (window as any).__fixture.state.accounts) account.defaultSelected = ["bilibili", "xiaohongshu"].includes(account.platformId);
+    (window as any).__fixture.state.accounts.find((account: any) => account.id === "a-bilibili").videoOptions = null;
+  });
   await page.goto("/");
-  await page.getByRole("navigation").getByRole("button", { name: "视频", exact: true }).click();
+  await navigate(page, "视频");
   await page.getByRole("textbox", { name: "视频标题" }).fill("B 站批量视频测试");
   await page.evaluate(() => (window as any).__fixture.pick("/fixture/bilibili-video.mp4"));
   await page.getByRole("button", { name: "点击导入视频", exact: false }).click();
@@ -476,87 +486,78 @@ test("Bilibili video options survive reopening and reach a multi-platform batch"
   await page.getByRole("textbox", { name: "话题标签" }).press("Enter");
   const target = page.locator(".video-target-summary:visible").filter({ hasText: "品牌哔哩哔哩" });
   await expect(target).toBeVisible();
-  await expect(page.getByLabel("视频分区")).toHaveValue("");
-  await page.getByLabel("视频分区").selectOption("101");
-  await page.getByLabel("创作类型").selectOption("2");
-  await page.getByLabel("转载来源").fill("https://example.test/original-video");
+  await expect(page.locator(".video-workspace:visible").locator(".platform-options")).toHaveCount(0);
+  let dialog = await videoSettings(page, "品牌哔哩哔哩");
+  await expect(dialog.getByLabel("创作类型")).toHaveValue("");
+  await expect(dialog.getByLabel("视频分区")).toHaveValue("");
+  await dialog.getByLabel("创作类型").selectOption("2");
+  await dialog.getByLabel("视频分区").selectOption("101");
+  await dialog.getByLabel("转载来源").fill("https://example.test/original-video");
+  await dialog.getByRole("button", { name: "保存视频设置", exact: true }).click();
+  await navigate(page, "视频");
+  await expect(page.getByRole("textbox", { name: "视频标题" })).toHaveValue("B 站批量视频测试");
   await page.getByRole("button", { name: "保存", exact: true }).click();
   await expect(page.getByRole("status").filter({ hasText: "稿件已保存" })).toBeVisible();
   await page.getByRole("button", { name: "新建视频", exact: true }).click();
   await page.locator(".draft-item:visible").filter({ hasText: "B 站批量视频测试" }).click();
   await expect(target).toBeVisible();
   await expect(page.locator(".video-target-summary:visible").filter({ hasText: "品牌小红书" })).toBeVisible();
-  await expect(page.getByLabel("视频分区")).toHaveValue("101");
-  await expect(page.getByLabel("创作类型")).toHaveValue("2");
-  await expect(page.getByLabel("转载来源")).toHaveValue("https://example.test/original-video");
   await page.getByRole("button", { name: "检查发布内容", exact: true }).click();
   await expect(page.getByText("发布前检查通过")).toBeVisible();
-  await page.getByLabel("转载来源").fill("https://example.test/original-video-updated");
-  await expect(page.getByRole("button", { name: "发布到已开启账号", exact: true })).toBeDisabled();
-  await page.getByRole("button", { name: "检查发布内容", exact: true }).click();
-  await page.evaluate(() => window.scrollTo(0, 0));
-  await page.screenshot({ path: "test-results/bilibili-options-1440.png", fullPage: true });
+  dialog = await videoSettings(page, "品牌哔哩哔哩");
+  await expect(dialog.getByLabel("视频分区")).toHaveValue("101");
+  await expect(dialog.getByLabel("创作类型")).toHaveValue("2");
+  await expect(dialog.getByLabel("转载来源")).toHaveValue("https://example.test/original-video");
+  await dialog.getByLabel("转载来源").fill("https://example.test/original-video-updated");
+  await page.screenshot({ path: "test-results/bilibili-account-settings-1440.png", fullPage: true });
   await page.setViewportSize({ width: 1000, height: 950 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false);
-  await page.screenshot({ path: "test-results/bilibili-options-1000.png", fullPage: true });
+  await page.screenshot({ path: "test-results/bilibili-account-settings-1000.png", fullPage: true });
+  await dialog.getByRole("button", { name: "保存视频设置", exact: true }).click();
+  await navigate(page, "视频");
+  await expect(page.getByRole("button", { name: "发布到已开启账号", exact: true })).toBeDisabled();
+  await expect(page.getByLabel("转载来源")).toHaveCount(0);
+  await page.getByRole("button", { name: "检查发布内容", exact: true }).click();
   await page.getByRole("button", { name: "发布到已开启账号", exact: true }).click();
-  await expect(page.locator(".task-row").filter({ hasText: "品牌哔哩哔哩" }).getByText("等待处理", { exact: true })).toBeVisible();
-  const result = await page.evaluate(() => ({
-    batch: (window as any).__fixture.state.batches[0],
-    content: (window as any).__fixture.state.contents.find((entry: any) => entry.title === "B 站批量视频测试"),
-    preflights: (window as any).__fixture.calls.filter((call: any) => call.path === "/api/preflight"),
-    enqueues: (window as any).__fixture.calls.filter((call: any) => call.path === "/api/batches"),
-  }));
-  expect(result.content.platformOptions.bilibili).toEqual({ tid: "101", copyright: "2", source: "https://example.test/original-video-updated" });
+  const result = await page.evaluate(() => {
+    const fixture = (window as any).__fixture;
+    return { content: fixture.state.contents.find((item: any) => item.title === "B 站批量视频测试"), batch: fixture.state.batches[0], snapshot: fixture.snapshots[fixture.state.batches[0].id], preflights: fixture.calls.filter((call: any) => call.path === "/api/preflight") };
+  });
+  expect(result.content.platformOptions).toEqual({});
+  expect(result.content.videoOptionsSource).toBe("account");
+  expect(result.snapshot.accountVideoOptions).toEqual({ "a-xhs": {}, "a-bilibili": { tid: "101", copyright: "2", source: "https://example.test/original-video-updated" } });
   expect(result.preflights).toHaveLength(2);
-  expect(result.preflights[1].body).toEqual({ contentId: result.content.id, accountIds: ["a-xhs", "a-bilibili"], mode: "publish" });
-  expect(result.enqueues[0].body).toMatchObject(result.preflights[1].body);
-  expect(result.batch.kind).toBe("video");
   expect(result.batch.tasks.map((task: any) => task.platformId)).toEqual(["xiaohongshu", "bilibili"]);
 });
 
-test("Bilibili categories require verification and intersect across selected accounts", async ({ page }) => {
-  await page.addInitScript((enabled) => { for (const account of (window as any).__fixture.state.accounts) account.defaultSelected = enabled.includes(account.platformId); }, ["bilibili"]);
+test("Bilibili categories belong to each account and remain available without an intersection", async ({ page }) => {
   await page.addInitScript(() => {
     const state = (window as any).__fixture.state;
+    for (const account of state.accounts) account.defaultSelected = account.platformId === "bilibili";
     const original = state.accounts.find((entry: any) => entry.id === "a-bilibili");
-    state.accounts.push({ ...original, id: "a-bilibili-second", label: "分区不同的 B 站账号", defaultSelected: false, bilibiliCategories: [{ value: "102", label: "测试分区 / 创作" }, { value: "103", label: "测试分区 / 生活" }] });
+    original.bilibiliCategories = [{ value: "101", label: "测试分区 / 科普" }];
+    state.accounts.push({ ...original, id: "a-bilibili-second", label: "分区不同的 B 站账号", videoOptions: null, bilibiliCategories: [{ value: "103", label: "测试分区 / 生活" }] });
   });
   await page.goto("/");
-  await page.getByRole("navigation").getByRole("button", { name: "视频", exact: true }).click();
-  await page.getByRole("textbox", { name: "视频标题" }).fill("分区更新测试");
-  await page.evaluate(() => (window as any).__fixture.pick("/fixture/categories.mp4"));
-  await page.getByRole("button", { name: "点击导入视频", exact: false }).click();
-  await page.getByRole("textbox", { name: "话题标签" }).fill("创作");
-  await page.getByRole("textbox", { name: "话题标签" }).press("Enter");
-  await expect(page.locator(".video-target-summary:visible").filter({ hasText: "品牌哔哩哔哩" })).toBeVisible();
-  const category = page.getByLabel("视频分区");
-  await expect(category).toHaveValue("");
-  await category.selectOption("101");
-  await page.getByLabel("创作类型").selectOption("1");
-  await page.getByRole("navigation").getByRole("button", { name: "账号管理", exact: true }).click();
-  await page.getByRole("switch", { name: "分区不同的 B 站账号 发布时默认选中", exact: true }).check();
-  await page.getByRole("navigation").getByRole("button", { name: "视频", exact: true }).click();
-  await expect(category.locator("option")).toHaveText(["请选择视频分区", "测试分区 / 创作"]);
-  await expect(category).toHaveValue("");
-  await expect(page.getByText("原选分区不适用于当前账号，请重新选择。")).toBeVisible();
-  await category.selectOption("102");
+  await navigate(page, "视频");
+  await page.getByRole("textbox", { name: "视频标题" }).fill("两个账号不同分区");
+  const dialog = await videoSettings(page, "分区不同的 B 站账号");
+  await expect(dialog.getByLabel("视频分区").locator("option")).toHaveText(["请选择视频分区", "测试分区 / 生活"]);
+  await dialog.getByLabel("创作类型").selectOption("1");
+  await dialog.getByLabel("视频分区").selectOption("103");
+  await dialog.getByRole("button", { name: "保存视频设置", exact: true }).click();
+  const first = await videoSettings(page, "品牌哔哩哔哩");
+  await expect(first.getByLabel("视频分区").locator("option")).toHaveText(["请选择视频分区", "测试分区 / 科普"]);
+  await expect(first.getByLabel("视频分区")).toHaveValue("101");
+  await first.getByRole("button", { name: "取消", exact: true }).click();
+  await navigate(page, "视频");
+  await expect(page.getByRole("textbox", { name: "视频标题" })).toHaveValue("两个账号不同分区");
+  await expect(page.getByLabel("视频分区")).toHaveCount(0);
   await page.getByRole("button", { name: "检查发布内容", exact: true }).click();
   await expect(page.getByRole("button", { name: "发布到已开启账号", exact: true })).toBeEnabled();
-  await page.evaluate(() => { (window as any).__fixture.state.accounts.find((entry: any) => entry.id === "a-bilibili").bilibiliCategories = []; });
-  await expect(category).toBeDisabled();
-  await expect(page.getByText("连接或验证账号以获取分区。")).toBeVisible();
-  await expect(page.getByRole("button", { name: "发布到已开启账号", exact: true })).toBeDisabled();
-  await page.evaluate(() => { (window as any).__fixture.state.accounts.find((entry: any) => entry.id === "a-bilibili").bilibiliCategories = [{ value: "101", label: "测试分区 / 科普" }]; });
-  await expect(page.getByText("已开启账号没有共同可用的视频分区，请在账号管理调整发布账号。")).toBeVisible();
-  await expect(category).toBeDisabled();
-  await page.getByRole("navigation").getByRole("button", { name: "账号管理" }).click();
-  await page.getByRole("button", { name: "检查 品牌哔哩哔哩 连接", exact: true }).click();
-  await page.getByRole("navigation").getByRole("button", { name: "视频", exact: true }).click();
-  await expect(category).toBeEnabled();
-  await expect(category.locator("option")).toHaveText(["请选择视频分区", "测试分区 / 创作"]);
-  await expect(category).toHaveValue("102");
-  await expect(page.getByRole("button", { name: "发布到已开启账号", exact: true })).toBeDisabled();
+  await page.getByRole("button", { name: "发布到已开启账号", exact: true }).click();
+  const snapshot = await page.evaluate(() => { const fixture = (window as any).__fixture; return fixture.snapshots[fixture.state.batches[0].id]; });
+  expect(snapshot.accountVideoOptions).toEqual({ "a-bilibili": { copyright: "1", tid: "101" }, "a-bilibili-second": { copyright: "1", tid: "103" } });
 });
 
 test("task receipts stay distinct and only known failures can retry", async ({ page }) => {
