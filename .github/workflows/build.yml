@@ -95,6 +95,16 @@ jobs:
         run: |
           npm ci
           python -m pip install -r engine/requirements-dev.txt pyinstaller==6.22.3 pytest==8.4.2
+      - name: Read application version
+        id: version
+        run: |
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          version = json.loads(Path("package.json").read_text(encoding="utf-8"))["version"]
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"version={version}\n")
+          PY
       - name: Check frontend and engine
         timeout-minutes: 10
         run: |
@@ -136,7 +146,7 @@ jobs:
       - name: Upload desktop artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: easy-publish-0.1.8-${{ matrix.artifact }}
+          name: easy-publish-${{ steps.version.outputs.version }}-${{ matrix.artifact }}
           path: |
             src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg
             src-tauri/target/${{ matrix.target }}/release/bundle/nsis/*-setup.exe
