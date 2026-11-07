@@ -46,7 +46,7 @@ macOS ARM、Intel 和 Windows 安装包都提供该入口，普通用户不需�
 }
 ```
 
-模板 ID 为 `clean`（清爽蓝）、`editorial`（墨色杂志）、`journal`（暖色手记）、`tech`（理性科技）。返回的 `content.id` 用于后续操作。正文中的图片先使用 `import_asset` 导入，再通过 `![说明](easy-asset://素材ID)` 引用；封面使用返回的图片 `asset.id` 填入 `coverAssetId`。
+模板 ID 为 `clean`（清爽蓝）、`editorial`（墨色杂志）、`journal`（暖色手记）、`tech`（理性科技）、`forest`（森林来信）、`artdeco`（黑金画报）。返回的 `content.id` 用于后续操作。正文中的图片先使用 `import_asset` 导入，再通过 `![说明](easy-asset://素材ID)` 引用；封面使用返回的图片 `asset.id` 填入 `coverAssetId`。
 
 调用 `preview_article` 可查看目标平台的 HTML 和样式说明；随后用 `preflight` 检查 `contentId` 及所选 `accountIds`。只有用户请求发布时才调用 `publish`：
 

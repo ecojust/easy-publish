@@ -81,7 +81,7 @@ def test_old_content_gets_default_template_without_modifying_source(api):
 def test_article_preview_exposes_templates_and_platform_specific_safe_html(api):
     client, _, _ = api
     state = client.get("/api/state").json()
-    assert {item["id"] for item in state["articleTemplates"]} == {"clean", "editorial", "journal", "tech"}
+    assert {item["id"] for item in state["articleTemplates"]} == {"clean", "editorial", "journal", "tech", "forest", "artdeco"}
     rendered = []
     for template in state["articleTemplates"]:
         response = client.post("/api/preview/article", json={"body": "## 标题\n\n正文 **重点**\n\n> 引用", "articleTemplateId": template["id"], "platformId": "wechat"})
@@ -90,7 +90,7 @@ def test_article_preview_exposes_templates_and_platform_specific_safe_html(api):
         assert "重点" in value["html"] and "style=" in value["html"]
         assert isinstance(value["notes"], list)
         rendered.append(value["html"])
-    assert len(set(rendered)) == 4
+    assert len(set(rendered)) == 6
     source = "## 标题\n\n<script>alert(1)</script>\n\n[bad](javascript:alert(1))"
     for platform in ("wechat", "zhihu", "dayu", "xueqiu"):
         response = client.post("/api/preview/article", json={"body": source, "articleTemplateId": "journal", "platformId": platform})
@@ -104,6 +104,29 @@ def test_preview_rejects_video_platforms_and_unknown_templates(api, fields):
     client, _, _ = api
     response = client.post("/api/preview/article", json={"body": "text", **fields})
     assert response.status_code in {400, 422}
+
+
+@pytest.mark.parametrize("template", ["forest", "artdeco"])
+def test_new_templates_round_trip_to_the_wechat_queue_without_changing_preview(api, tmp_path, template):
+    from PIL import Image
+    client, runtime, app = api
+    account = ready_account(client, "wechat", credentials={"appId": "fixture-app", "appSecret": "fixture-secret"})
+    image = tmp_path / "cover.png"
+    Image.new("RGB", (3, 3), "green").save(image)
+    imported = client.post("/api/assets/import", json={"path": str(image), "kind": "image"})
+    assert imported.status_code == 200
+    source = "## 一个新的章节\n\n正文 **重要信息**\n\n> 引用里的文字\n\n```text\n原样代码\n```"
+    content = create_content(client, body=source, articleTemplateId=template, coverAssetId=imported.json()["id"])
+    preview = client.post("/api/preview/article", json={"body": source, "articleTemplateId": template, "platformId": "wechat"})
+    assert preview.status_code == 200
+    response = client.post("/api/batches", json=request_batch(content, [account]))
+    assert response.status_code == 200
+    completed_batch(client, response.json()["id"])
+    assert runtime.publish_calls[0]["body_html"] == preview.json()["html"]
+    stored = app.state.service.store.content(app.state.service.content_row(content["id"]))
+    assert stored["body"] == source and stored["articleTemplateId"] == template
+    snapshot = json.loads(app.state.service.store.one("SELECT snapshot FROM batches WHERE id=?", (response.json()["id"],))["snapshot"])
+    assert snapshot["body"] == source and snapshot["articleTemplateId"] == template
 
 
 def test_template_choice_is_snapshotted_and_target_html_uses_selected_template(api):

@@ -1,6 +1,6 @@
 export type ContentKind = "article" | "video";
 export type PublishMode = "publish" | "draft";
-export type ArticleTemplateId = "clean" | "editorial" | "journal" | "tech";
+export type ArticleTemplateId = "clean" | "editorial" | "journal" | "tech" | "forest" | "artdeco";
 export interface ArticleTemplate { id: ArticleTemplateId; name: string; description: string; accent: string; }
 export interface ArticlePreview { html: string; notes: string[]; }
 export interface McpConfiguration { command: string; args: string[]; env?: Record<string, string>; }

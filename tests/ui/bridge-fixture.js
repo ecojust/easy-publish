@@ -21,10 +21,12 @@
   ];
   const bilibiliCategories = [{ value: "101", label: "测试分区 / 科普" }, { value: "102", label: "测试分区 / 创作" }];
   const articleTemplates = [
-    { id: "clean", name: "清爽蓝", description: "蓝色标题与留白，适合知识分享和日常文章", accent: "#2563eb" },
-    { id: "editorial", name: "墨色杂志", description: "衬线标题与细分隔线，适合观点和深度阅读", accent: "#9a3412" },
-    { id: "journal", name: "暖色手记", description: "暖色小标题与柔和引用，适合故事和生活记录", accent: "#b45309" },
-    { id: "tech", name: "理性科技", description: "青绿色层次与清晰代码块，适合技术和产品内容", accent: "#0f766e" },
+    {"id": "clean", "name": "清爽蓝", "description": "蓝色章节条、清晰列表与留白，适合知识分享", "accent": "#2563eb"},
+    {"id": "editorial", "name": "墨色杂志", "description": "米白纸面、衬线标题与双线装饰，适合深度阅读", "accent": "#9a3412"},
+    {"id": "journal", "name": "暖色手记", "description": "暖色标题卡、圆角引用与照片边框，适合生活记录", "accent": "#b45309"},
+    {"id": "tech", "name": "理性科技", "description": "深青标题、终端代码块与规整表格，适合技术文章", "accent": "#0f766e"},
+    {"id": "forest", "name": "森林来信", "description": "浅绿纸面、圆角边框与柔和强调，适合自然和人文", "accent": "#2f6b4f"},
+    {"id": "artdeco", "name": "黑金画报", "description": "黑金标题带、几何边框与高对比引用，适合专题策划", "accent": "#b7791f"},
   ];
   const account = (id, platformId, label, status = "ready") => ({ id, platformId, label, status, defaultSelected: true, message: status === "ready" ? "已连接（浏览器测试替身）" : "请连接测试账号", updatedAt: date, credentialConfigured: platformId === "wechat", ...(platformId === "bilibili" ? { bilibiliCategories: status === "ready" ? clone(bilibiliCategories) : [] } : {}) });
   const draft = (id, kind, title, body) => ({ id, kind, title, body, description: "", tags: [], author: "", videoAssetId: null, coverAssetId: null, imageAssetIds: [], platformOptions: {}, articleTemplateId: "clean", platformPublicationStates: {}, createdAt: date, updatedAt: date, revision: 1 });

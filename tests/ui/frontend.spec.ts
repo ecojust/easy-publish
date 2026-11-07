@@ -162,7 +162,9 @@ test("article templates use engine previews and persist through saving and publi
   await page.getByRole("textbox", { name: "文章标题" }).fill("文章模板工作流");
   await page.getByRole("textbox", { name: "文章正文" }).fill("## 让内容更易读\n\n一份正文，按平台转换格式。\n\n> 清楚的结构，让阅读更轻松。\n\n- 选择模板\n- 检查预览\n- 分发内容");
   const templatePicker = page.getByRole("group", { name: "文章模板", exact: true });
-  for (const [id, name] of [["clean", "清爽蓝"], ["editorial", "墨色杂志"], ["journal", "暖色手记"], ["tech", "理性科技"]]) {
+  await expect(templatePicker.locator(".template-miniature")).toHaveCount(6);
+  expect(await page.evaluate(() => (window as any).__fixture.calls.filter((call: any) => call.method !== "GET" && call.path !== "/api/preview/article"))).toEqual([]);
+  for (const [id, name] of [["clean", "清爽蓝"], ["editorial", "墨色杂志"], ["journal", "暖色手记"], ["tech", "理性科技"], ["forest", "森林来信"], ["artdeco", "黑金画报"]]) {
     await templatePicker.getByRole("button", { name: new RegExp(name) }).click();
     await expect(page.locator(`.markdown-preview [data-template="${id}"]`)).toBeVisible();
     await expect(templatePicker.getByRole("button", { name: new RegExp(name) })).toHaveAttribute("aria-pressed", "true");
@@ -171,14 +173,14 @@ test("article templates use engine previews and persist through saving and publi
   await expect(page.locator(".preview-notes")).toContainText("原生字体和颜色");
   await expect(page.locator(".markdown-preview [data-template]")).toHaveCount(0);
   await page.getByRole("combobox", { name: "文章预览平台" }).selectOption("wechat");
-  await expect(page.locator('.markdown-preview [data-template="tech"]')).toBeVisible();
+  await expect(page.locator('.markdown-preview [data-template="artdeco"]')).toBeVisible();
   await page.getByRole("button", { name: "保存", exact: true }).click();
   await expect(page.getByRole("status").filter({ hasText: "稿件已保存" })).toBeVisible();
   await page.getByRole("button", { name: "新建文章", exact: true }).click();
   await expect(templatePicker.getByRole("button", { name: /清爽蓝/ })).toHaveAttribute("aria-pressed", "true");
   await page.locator(".draft-item:visible").filter({ hasText: "文章模板工作流" }).click();
-  await expect(templatePicker.getByRole("button", { name: /理性科技/ })).toHaveAttribute("aria-pressed", "true");
-  await expect(page.locator('.markdown-preview [data-template="tech"]')).toBeVisible();
+  await expect(templatePicker.getByRole("button", { name: /黑金画报/ })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator('.markdown-preview [data-template="artdeco"]')).toBeVisible();
   await page.evaluate(() => window.scrollTo(0, 0));
   await page.screenshot({ path: "test-results/article-templates-1440.png", fullPage: true });
   await page.setViewportSize({ width: 1000, height: 950 });
@@ -189,10 +191,14 @@ test("article templates use engine previews and persist through saving and publi
   await page.getByRole("button", { name: "发布到所选账号", exact: true }).click();
   const result = await page.evaluate(() => ({ contents: (window as any).__fixture.state.contents, batch: (window as any).__fixture.state.batches[0], previews: (window as any).__fixture.calls.filter((call: any) => call.path === "/api/preview/article") }));
   const saved = result.contents.find((item: any) => item.id === result.batch.contentId);
-  expect(saved.articleTemplateId).toBe("tech");
+  expect(saved.articleTemplateId).toBe("artdeco");
   expect(saved.body).toContain("让内容更易读");
-  expect(result.previews.some((call: any) => call.body.articleTemplateId === "tech" && call.body.platformId === "zhihu")).toBe(true);
-  expect(result.previews.some((call: any) => call.body.articleTemplateId === "tech" && call.body.platformId === "wechat")).toBe(true);
+  expect(saved.body).not.toContain("灵感的形状");
+  const samples = result.previews.filter((call: any) => call.body.body.startsWith("# 灵感的形状"));
+  expect(samples).toHaveLength(6);
+  expect(new Set(samples.map((call: any) => call.body.articleTemplateId)).size).toBe(6);
+  expect(result.previews.some((call: any) => call.body.articleTemplateId === "artdeco" && call.body.platformId === "zhihu")).toBe(true);
+  expect(result.previews.some((call: any) => call.body.articleTemplateId === "artdeco" && call.body.platformId === "wechat")).toBe(true);
 });
 
 test("engine preview failures can retry and preview markup remains constrained", async ({ page }) => {
@@ -202,7 +208,7 @@ test("engine preview failures can retry and preview markup remains constrained",
     window.easyPublish!.apiRequest = async (method, path, body) => {
       if (path !== "/api/preview/article") return apiRequest(method, path, body);
       if ((window as any).__previewFailure) throw { error: "测试：渲染暂时失败" };
-      return { html: '<p style="color:rgb(7,8,9);position:fixed;background-image:url(https://example.test/track.png)" onclick="window.__previewInjected=true">安全模板样式</p><script>window.__previewInjected=true</script><img src="https://example.test/track.png"><a href="javascript:alert(1)">不安全链接</a>', notes: [] } as any;
+      return { html: '<p style="color:rgb(7,8,9);display:inline-block;box-shadow:3px 3px 0 #d6c7a7;border-radius:12px;white-space:pre-wrap;text-decoration:underline;position:fixed;background-image:url(https://example.test/track.png)" onclick="window.__previewInjected=true">安全模板样式</p><script>window.__previewInjected=true</script><img src="https://example.test/track.png"><a href="javascript:alert(1)">不安全链接</a>', notes: [] } as any;
     };
   });
   await page.goto("/");
@@ -212,6 +218,11 @@ test("engine preview failures can retry and preview markup remains constrained",
   await page.getByRole("button", { name: "重新生成预览", exact: true }).click();
   const text = page.locator(".markdown-preview p").filter({ hasText: "安全模板样式" });
   await expect(text).toHaveCSS("color", "rgb(7, 8, 9)");
+  await expect(text).toHaveCSS("display", "inline-block");
+  await expect(text).toHaveCSS("box-shadow", "rgb(214, 199, 167) 3px 3px 0px 0px");
+  await expect(text).toHaveCSS("border-top-left-radius", "12px");
+  await expect(text).toHaveCSS("white-space", "pre-wrap");
+  await expect(text).toHaveCSS("text-decoration-line", "underline");
   await expect(text).not.toHaveAttribute("onclick");
   expect(await text.evaluate((node: HTMLElement) => [node.style.position, node.style.backgroundImage])).toEqual(["", ""]);
   await expect(page.locator('.markdown-preview script, .markdown-preview img, .markdown-preview a[href^="javascript:"]')).toHaveCount(0);

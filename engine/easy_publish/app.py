@@ -13,6 +13,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, StrictBool
 
 from easy_publish.content import ContentInput, import_asset, preview_asset, render_article
+from easy_publish.article_templates import ArticleTemplateId
 from easy_publish.catalog import BY_ID
 from easy_publish.service import Problem, Service
 
@@ -48,7 +49,7 @@ class BatchInput(Selection):
 
 class ArticlePreviewInput(Input):
     body: str = Field(default="", max_length=500_000)
-    articleTemplateId: Literal["clean", "editorial", "journal", "tech"] = "clean"
+    articleTemplateId: ArticleTemplateId = "clean"
     platformId: str | None = Field(default=None, max_length=40)
 
 

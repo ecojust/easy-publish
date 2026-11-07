@@ -91,7 +91,7 @@ test("account switches update only their defaults without losing drafts or manua
   await navigate(page, "视频");
   await expect(target(page, "品牌抖音")).toBeChecked();
   await expect(target(page, "品牌快手")).not.toBeChecked();
-  const mutations = await page.evaluate(() => (window as any).__fixture.calls.filter((call: any) => call.method !== "GET"));
+  const mutations = await page.evaluate(() => (window as any).__fixture.calls.filter((call: any) => call.method !== "GET" && !(call.method === "POST" && call.path === "/api/preview/article")));
   expect(mutations.map((call: any) => [call.method, call.path, call.body])).toEqual([
     ["PUT", "/api/accounts/a-wechat/preferences", { defaultSelected: false }],
     ["PUT", "/api/accounts/a-douyin/preferences", { defaultSelected: false }],

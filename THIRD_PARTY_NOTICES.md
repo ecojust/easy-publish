@@ -24,7 +24,7 @@ Easy Publish 使用 [MIT 许可证](LICENSE)。本文件记录直接参考或包
 
 参考 `src/views/skillapps/WechatPublisher.vue`、`WechatPublisherTemplate.js` 与 `src-tauri/addin/skills/wechat-publisher.zip` 中文章、正文图片、封面和公众号草稿的业务流程。该参考实现通过 `draft/add` 创建草稿；这不等于正式发布或向关注者群发。
 
-Easy Publish 的 [微信公众号适配器](engine/easy_publish/providers/wechat.py) 是独立编写的确定性官方 API 实现。它使用 AppID / AppSecret、内存访问令牌、图片上传、草稿与 `freepublish` 发布查询，分别记录草稿、受理和最终结果。未复制 oDesk 的 AI / OpenCode 调度、技能包、脚本、配置或任何 token 缓存文件。
+Easy Publish 的 [微信公众号适配器](engine/easy_publish/providers/wechat.py) 是独立编写的确定性官方 API 实现。它使用 AppID / AppSecret、内存访问令牌、图片上传、草稿与 `freepublish` 发布查询，分别记录草稿、受理和最终结果。文章模板另参考上述 ZIP 中 editorial、paper、forest、artdeco 与 blueprint 的版式方向，由本项目独立生成受控的内联 HTML／CSS；来源和兼容取舍见 [文章模板说明](docs/article-templates.md)。未引入 Wenyan CLI 或运行上游排版脚本，未复制 oDesk 的 AI / OpenCode 调度、技能包、脚本、配置或任何 token 缓存文件。
 
 ## biliup
 

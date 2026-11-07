@@ -19,6 +19,7 @@ import httpx
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from . import __version__
+from .article_templates import ArticleTemplateId
 from .content import ContentInput
 from .mcp_connection import ConnectionUnavailable, read_endpoint
 
@@ -63,7 +64,7 @@ class ImportAsset(Arguments):
 
 class PreviewArticle(Arguments):
     body: str = Field(max_length=500_000)
-    articleTemplateId: Literal["clean", "editorial", "journal", "tech"] = "clean"
+    articleTemplateId: ArticleTemplateId = "clean"
     platformId: Literal["wechat", "zhihu", "dayu", "xueqiu"] | None = None
 
 

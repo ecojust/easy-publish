@@ -55,7 +55,7 @@ SQLite 保存稿件、账号公开元数据、批次及各目标状态。`Conten
 
 `Account.defaultSelected` 保存在独立的 `account_preferences` 表，旧账号缺少记录时返回 true；SQLite schema 版本 3 采用加表升级。删除账号同步清理偏好，重新连接不覆盖偏好。工作台初始化按偏好、连接状态、类型／操作能力和既有投稿历史筛选；轮询保留手动选择，偏好变更只重新计算对应账号。开关不创建发布任务。
 
-`ContentInput.articleTemplateId` 为 clean／editorial／journal／tech，旧稿件默认为 clean。Markdown 保持原稿，在生成每个目标的 payload 时按模板及平台转换 HTML；预览与实际提交使用同一服务端渲染器。
+`ContentInput.articleTemplateId` 为 clean／editorial／journal／tech／forest／artdeco，旧稿件默认为 clean。Markdown 保持原稿，在生成每个目标的 payload 时按模板及平台转换 HTML；模板缩略图、预览与实际提交使用同一服务端渲染器；API 与 MCP 复用引擎的 ArticleTemplateId 类型。六套排版来源、图注和平台兼容说明见 [文章模板](article-templates.md)。
 
 `ContentInput.platformOptions` 按平台 ID 保存声明等表单值；平台通过 `Platform.fields` 声明必填项、选项及提示，前端与 preflight 都校验。适配器收到当前目标的平面 `PublishPayload.options`。预检素材读取和实际 payload 生成共用 `target_projection.py`，在副本中移除目标不使用的字段和选项：抖音不消费自定义封面，B 站原创不消费转载来源，大鱼号非转载不消费来源链接。视频忽略文章正文和正文图片；文章忽略视频素材。原稿及批次快照保留完整输入，使用到的素材、必填项及平台长度限制继续校验。
 

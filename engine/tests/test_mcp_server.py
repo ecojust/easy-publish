@@ -70,26 +70,31 @@ def test_tool_capabilities_accounts_and_templates_are_kind_scoped(mcp_api):
     runtime.vault.put(article["id"], "session", b"private-cookie-never-exposed")
     platforms = result_value(call(client, "list_platforms", {"kind": "article"}))
     assert all("article" in p["kinds"] for p in platforms["platforms"])
-    assert {p["id"] for p in platforms["articleTemplates"]} == {"clean", "editorial", "journal", "tech"}
+    assert {p["id"] for p in platforms["articleTemplates"]} == {"clean", "editorial", "journal", "tech", "forest", "artdeco"}
     accounts = result_value(call(client, "list_accounts", {"kind": "article"}))["accounts"]
     assert [a["id"] for a in accounts] == [article["id"]]
     assert video["id"] not in json.dumps(accounts)
     assert "private-cookie" not in json.dumps(accounts)
 
 
-def test_save_content_and_preview_are_local_and_preserve_template(mcp_api):
+@pytest.mark.parametrize("template", ["journal", "forest", "artdeco"])
+def test_save_content_and_preview_are_local_and_preserve_template(mcp_api, template):
     client, runtime, _ = mcp_api
     saved = result_value(call(client, "save_content", {"content": {"kind": "article", "title": "MCP 文章",
-                              "body": "## 标题\n\n正文与 **重点**", "articleTemplateId": "journal"}}))["content"]
-    assert saved["articleTemplateId"] == "journal"
+                              "body": "## 标题\n\n正文与 **重点**", "articleTemplateId": template}}))["content"]
+    assert saved["articleTemplateId"] == template
     assert runtime.publish_calls == []
-    preview = result_value(call(client, "preview_article", {"body": saved["body"], "articleTemplateId": "journal", "platformId": "wechat"}))
+    preview = result_value(call(client, "preview_article", {"body": saved["body"], "articleTemplateId": template, "platformId": "wechat"}))
     assert "<strong" in preview["html"] and "style=" in preview["html"]
     assert preview["notes"]
     listed = result_value(call(client, "list_contents", {"kind": "article"}))["contents"]
     assert listed[0]["id"] == saved["id"] and "body" not in listed[0]
     read = result_value(call(client, "get_content", {"contentId": saved["id"]}))["content"]
     assert read["body"] == saved["body"]
+    assert read["articleTemplateId"] == template
+    desktop_preview = client.post("/api/preview/article", json={"body": read["body"], "articleTemplateId": template, "platformId": "wechat"})
+    assert desktop_preview.status_code == 200
+    assert desktop_preview.json() == preview
     invalid = call(client, "preview_article", {"body": "text", "platformId": "douyin"})
     assert invalid["isError"] is True
 
@@ -378,6 +383,7 @@ def test_real_stdio_initialize_discovery_and_scoped_tool_call(tmp_path):
     tools = {tool["name"]: tool for tool in responses[1]["result"]["tools"]}
     assert tools["publish"]["annotations"]["destructiveHint"] is True
     assert "requestId" in tools["publish"]["inputSchema"]["required"]
+    assert set(tools["preview_article"]["inputSchema"]["properties"]["articleTemplateId"]["enum"]) == {"clean", "editorial", "journal", "tech", "forest", "artdeco"}
     assert responses[2]["result"]["structuredContent"] == {"accounts": [], "kind": "article"}
     assert responses[3]["result"]["isError"] is True
     assert len(calls) == 1
