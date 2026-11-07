@@ -283,7 +283,7 @@ for (const target of [{ id: "a-douyin", label: "品牌抖音", platform: "Douyin
     const card = page.locator(".account-card").filter({ hasText: target.label });
     await card.getByRole("button", { name: "登录账号", exact: true }).click();
     await expect(card.getByText("等待登录", { exact: true })).toBeVisible();
-    await expect(card.getByRole("button", { name: "等待完成登录", exact: true })).toBeDisabled();
+    await expect(card.getByRole("button", { name: "取消连接", exact: true })).toBeEnabled();
     await expect(card.getByRole("button", { name: `检查 ${target.label} 连接`, exact: true })).toBeDisabled();
     await expect(card).toContainText("等待扫码登录（测试进度）");
     await page.evaluate(({ id }) => (window as any).__fixture.loginProgress(id, "已扫码，正在验证账号（测试进度）"), target);
@@ -299,6 +299,52 @@ for (const target of [{ id: "a-douyin", label: "品牌抖音", platform: "Douyin
     await expect(card.getByText("等待登录", { exact: true })).toHaveCount(0);
     const requests = await page.evaluate(({ id }) => (window as any).__fixture.calls.filter((call: any) => call.path === `/api/accounts/${id}/login`), target);
     expect(requests).toHaveLength(1);
+  });
+}
+
+for (const operation of ["login", "check"] as const) {
+  test(`account ${operation} can be cancelled without deleting data or reloading the page`, async ({ page }) => {
+    await page.addInitScript(({ operation }) => {
+      const fixture = (window as any).__fixture;
+      const account = fixture.state.accounts.find((item: any) => item.id === "a-douyin");
+      account.status = operation === "login" ? "login_required" : "ready";
+      fixture.deferLogin(account.id);
+      fixture.seedTasks();
+    }, { operation });
+    await page.goto("/");
+    await page.evaluate(() => { (window as any).__connectionPageMarker = "preserve-this-page"; });
+    await page.getByRole("navigation").getByRole("button", { name: "账号管理" }).click();
+    const filter = page.getByRole("button", { name: "视频平台", exact: true });
+    await filter.click();
+    const card = page.locator(".account-card").filter({ hasText: "品牌抖音" });
+    await expect(card.getByRole("button", { name: "取消连接", exact: true })).toHaveCount(0);
+    const before = await page.evaluate(() => {
+      const fixture = (window as any).__fixture;
+      return { accounts: fixture.state.accounts.length, batches: fixture.state.batches };
+    });
+    await card.getByRole("button", { name: operation === "login" ? "登录账号" : "检查 品牌抖音 连接", exact: true }).click();
+    await expect(card.getByText("等待登录", { exact: true })).toBeVisible();
+    await card.getByRole("button", { name: "取消连接", exact: true }).click();
+    await expect(card).toContainText("连接已取消");
+    await expect(card.getByRole("button", { name: "取消连接", exact: true })).toHaveCount(0);
+    await expect(card.getByRole("button", { name: "登录账号", exact: true })).toBeEnabled();
+    await expect(filter).toHaveClass("active");
+    const after = await page.evaluate(() => {
+      const fixture = (window as any).__fixture;
+      return { marker: (window as any).__connectionPageMarker, accounts: fixture.state.accounts.length, batches: fixture.state.batches };
+    });
+    expect(after).toEqual({ marker: "preserve-this-page", ...before });
+    await card.getByRole("button", { name: "登录账号", exact: true }).click();
+    await expect(card.getByText("已连接", { exact: true })).toBeVisible();
+    await expect(card.getByRole("button", { name: "取消连接", exact: true })).toHaveCount(0);
+    const calls = await page.evaluate(() => (window as any).__fixture.calls
+      .filter((call: any) => call.method !== "GET" && call.path.startsWith("/api/accounts/"))
+      .map((call: any) => `${call.method} ${call.path}`));
+    expect(calls).toEqual([
+      `POST /api/accounts/a-douyin/${operation}`,
+      "POST /api/accounts/a-douyin/cancel",
+      "POST /api/accounts/a-douyin/login",
+    ]);
   });
 }
 

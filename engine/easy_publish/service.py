@@ -30,6 +30,7 @@ class Service:
         self.store = Store(data_dir)
         self.wake = asyncio.Event()
         self.jobs = {}
+        self.account_cancellations = {}
         self.queue_task = None
         self.closing = False
 
@@ -61,9 +62,10 @@ class Service:
         self.closing = True
         await self.runtime.shutdown()
         for task in [self.queue_task, *self.jobs.values()]:
-            if task:
+            if task and not task.cancelling():
                 task.cancel()
         await asyncio.gather(*(t for t in [self.queue_task, *self.jobs.values()] if t), return_exceptions=True)
+        await asyncio.gather(*list(self.account_cancellations.values()), return_exceptions=True)
         self.store.recover()
         self.store.close()
 
@@ -110,7 +112,7 @@ class Service:
         return self.store.content(self.content_row(identifier))
 
     def busy_account(self, identifier):
-        return self.store.one("SELECT id FROM tasks WHERE account_id=? AND status IN ('queued','running','submitting')", (identifier,)) or identifier in self.jobs
+        return self.store.one("SELECT id FROM tasks WHERE account_id=? AND status IN ('queued','running','submitting')", (identifier,)) or identifier in self.jobs or identifier in self.account_cancellations
 
     def add_account(self, platform_id, label, credentials):
         platform = BY_ID.get(platform_id)
@@ -160,6 +162,37 @@ class Service:
             db.execute("DELETE FROM account_metadata WHERE account_id=?", (identifier,))
             db.execute("UPDATE accounts SET status='logging_in',message='正在连接账号',updated=? WHERE id=?", (now(), identifier))
         self.jobs[identifier] = asyncio.create_task(self._connect(account, operation))
+
+    async def cancel_account(self, identifier):
+        self.account_row(identifier)
+        cancellation = self.account_cancellations.get(identifier)
+        if cancellation is None:
+            job = self.jobs.get(identifier)
+            if job is None or job.done():
+                return
+            cancellation = asyncio.create_task(self._cancel_account_job(identifier, job))
+            self.account_cancellations[identifier] = cancellation
+        # A disconnected request or a repeated click must not interrupt worker cleanup.
+        await asyncio.shield(cancellation)
+
+    async def _cancel_account_job(self, identifier, job):
+        try:
+            # The worker may have completed before this coroutine got its first turn.
+            if job.done():
+                return
+            if not job.cancelling():
+                job.cancel()
+            # Runtime.run owns the worker process group and deletes its workspace
+            # in finally. Retain account ownership until that cleanup has finished.
+            await asyncio.gather(job, return_exceptions=True)
+            with self.store.transaction() as db:
+                db.execute("DELETE FROM account_metadata WHERE account_id=?", (identifier,))
+                db.execute("UPDATE accounts SET status='login_required',message='连接已取消',updated=? WHERE id=?", (now(), identifier))
+        finally:
+            # A task cancelled before its first turn never enters _connect's finally.
+            if self.jobs.get(identifier) is job:
+                self.jobs.pop(identifier, None)
+            self.account_cancellations.pop(identifier, None)
 
     async def _connect(self, account, operation):
         identifier = account["id"]

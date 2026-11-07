@@ -178,6 +178,11 @@ def create_app(data_dir: Path, token: str, runtime=None, *, mcp_token: str | Non
         await service.connect_account(identifier, "check")
         return {"ok": True}
 
+    @app.post("/api/accounts/{identifier}/cancel")
+    async def cancel_account(identifier: str):
+        await service.cancel_account(identifier)
+        return {"ok": True}
+
     @app.post("/api/preflight")
     async def preflight(value: Selection):
         return service.preflight(service.store.content(service.content_row(value.contentId)), value.accountIds, value.mode)

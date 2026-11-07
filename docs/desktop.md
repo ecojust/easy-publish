@@ -1,6 +1,6 @@
 # 桌面外壳与安装包
 
-Easy Publish 使用 Tauri 2 系统 WebView。macOS ARM、macOS Intel 与 Windows x64 分别构建原生安装包，版本为 `0.1.4`。macOS 最低为 13.5；Windows 为 Windows 10／11 x64。该下限匹配内置 Patchright 驱动的 [Node.js 24 系统要求](https://github.com/nodejs/node/blob/v24.13.0/BUILDING.md#platform-list)。Python 3.12 发布引擎由 PyInstaller 打包并随应用安装，用户无需安装 Python。发布浏览器由引擎管理，首次使用在应用中准备。
+Easy Publish 使用 Tauri 2 系统 WebView。macOS ARM、macOS Intel 与 Windows x64 分别构建原生安装包，版本为 `0.1.5`。macOS 最低为 13.5；Windows 为 Windows 10／11 x64。该下限匹配内置 Patchright 驱动的 [Node.js 24 系统要求](https://github.com/nodejs/node/blob/v24.13.0/BUILDING.md#platform-list)。Python 3.12 发布引擎由 PyInstaller 打包并随应用安装，用户无需安装 Python。发布浏览器由引擎管理，首次使用在应用中准备。
 
 ## 开发
 

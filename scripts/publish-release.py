@@ -16,6 +16,7 @@ import shutil
 import stat
 import subprocess
 import tempfile
+import time
 import tomllib
 import zipfile
 
@@ -28,6 +29,8 @@ PLATFORMS = {
 }
 JOBS = {"macOS Apple Silicon", "macOS Intel", "Windows x64", "Browser interface fixtures"}
 MAX_FILE_BYTES = 1024 * 1024 * 1024
+DRAFT_VISIBILITY_SECONDS = 20
+DRAFT_RETRY_SECONDS = 2
 
 
 class ReleaseError(RuntimeError):
@@ -45,8 +48,11 @@ def command(arguments: list[str]) -> str:
     return result.stdout.strip()
 
 
-def api(path: str, *, collection: bool = False) -> dict | list:
-    result = subprocess.run(["gh", "api", path], cwd=ROOT, capture_output=True, text=True, encoding="utf-8", timeout=120)
+def api(path: str, *, collection: bool = False, timeout: float = 120) -> dict | list:
+    try:
+        result = subprocess.run(["gh", "api", path], cwd=ROOT, capture_output=True, text=True, encoding="utf-8", timeout=timeout)
+    except subprocess.TimeoutExpired:
+        raise ReleaseError("GitHub API request timed out; no command output was logged.") from None
     if result.returncode:
         raise ReleaseError("GitHub API request failed; no signed URL or credential was logged.")
     try:
@@ -57,11 +63,17 @@ def api(path: str, *, collection: bool = False) -> dict | list:
     return value
 
 
-def find_release(repo: str, tag: str) -> dict:
+def find_release(repo: str, tag: str, *, timeout: float | None = None) -> dict:
     # Authenticated release listing includes drafts; the tag lookup endpoint
     # is documented for published releases and need not expose a new draft.
+    deadline = time.monotonic() + timeout if timeout is not None else None
     for page in range(1, 101):
-        entries = api(f"repos/{repo}/releases?per_page=100&page={page}", collection=True)
+        options = {"collection": True}
+        if deadline is not None:
+            remaining = deadline - time.monotonic()
+            require(remaining > 0, "GitHub did not return the newly created draft release before the deadline.")
+            options["timeout"] = min(120, remaining)
+        entries = api(f"repos/{repo}/releases?per_page=100&page={page}", **options)
         matches = [entry for entry in entries if entry.get("tag_name") == tag]
         require(len(matches) <= 1, "Multiple releases use the requested tag.")
         if matches:
@@ -182,6 +194,21 @@ def verify_draft(release: dict, tag: str, marker: str) -> None:
             "Refusing to overwrite a published release or a draft from another publication.")
 
 
+def wait_for_created_draft(repo: str, tag: str, marker: str) -> dict:
+    """Wait only after our create succeeded; never retry a mutation or an API error."""
+    deadline = time.monotonic() + DRAFT_VISIBILITY_SECONDS
+    while True:
+        remaining = deadline - time.monotonic()
+        require(remaining > 0, "GitHub did not return the newly created draft release before the deadline.")
+        release = find_release(repo, tag, timeout=remaining)
+        if release:
+            verify_draft(release, tag, marker)
+            return release
+        remaining = deadline - time.monotonic()
+        require(remaining > 0, "GitHub did not return the newly created draft release before the deadline.")
+        time.sleep(min(DRAFT_RETRY_SECONDS, remaining))
+
+
 def verify_assets(release: dict, files: list[Path], repo: str, scratch: Path) -> None:
     assets = release.get("assets", [])
     expected = {file.name: file for file in files}
@@ -235,8 +262,7 @@ def publish(tag: str, run_id: int, source: str) -> str:
         if not release:
             command(["gh", "release", "create", tag, "--repo", repo, "--verify-tag", "--target", head,
                      "--draft", "--title", f"Easy Publish {version}", "--notes-file", str(notes)])
-            release = find_release(repo, tag)
-            require(bool(release), "GitHub did not return the newly created draft release.")
+            release = wait_for_created_draft(repo, tag, marker)
         release_path = f"{root}/releases/{release['id']}"
         # Recheck the draft before mutation, including when resuming our own draft.
         release = api(release_path)

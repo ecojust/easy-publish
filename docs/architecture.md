@@ -40,6 +40,7 @@ API 成功直接返回 JSON，失败为 `{"error":"公开且已脱敏的错误",
 | DELETE /api/accounts/:id | 删除本地账号和会话，不操作平台内容 |
 | POST /api/accounts/:id/login | 启动登录／公众号连接检查，返回 `{ok:true}`；state 轮询进度 |
 | POST /api/accounts/:id/check | 检查会话；返回 `{ok:true}` |
+| POST /api/accounts/:id/cancel | 取消当前账号的登录／检查，等待对应 worker 清理后返回 `{ok:true}`；已结束时不改写状态，不影响发布任务 |
 | POST /api/preflight | `{contentId,accountIds,mode:publish\|draft}`；返回 `{ok,targets:[{accountId,errors:string[],warnings:string[]}]}` |
 | POST /api/batches | 上述字段及 `requestId` UUID；同一 requestId 不重复创建；返回 Batch |
 | POST /api/batches/:id/cancel | 取消未完成任务；提交后的不明结果记 unknown |
@@ -60,6 +61,8 @@ SQLite 保存稿件、账号公开元数据、批次及各目标状态。`Conten
 凭据／浏览器 storage state 通过引擎凭据库保存；密钥仅保存在应用数据目录 `vault-local-v1/master.key`，不访问系统凭据服务；macOS／Linux 为目录 0700、文件 0600，Windows 继承当前用户应用目录权限。密钥与密文放在一起，不能抵御可读取完整应用目录的进程。开发测试可使用显式测试密钥。旧 `vault/` 文件保持不变，不做需要系统钥匙串的自动迁移；旧账号提示重新连接。浏览器会话在独立临时目录解密给单个 worker，结束后清理，避免账号互用。任何上游缓存或参考仓库中的凭据不得复制。
 
 worker 的统一输入／输出和事件由 `engine/easy_publish/providers/base.py` 定义。每个任务独立进程、总时限、只点击／提交一次；提交之前先发送 submitting 事件，父进程 SQLite 提交完成后回传 ACK，worker 收到确认才允许发生平台写入。无法判断提交结果时返回 unknown，不自动重试。
+
+账号连接取消与发布取消分开。取消登录／检查时，Service 保留账号占用直到对应 worker 和工作目录清理结束；重复请求共享同一次清理，即使请求断开也继续完成。清理完成前不能重连或删除账号，取消不清除之前已经保存的会话；已完成的连接不被迟到的取消降级。
 
 本轮开发验证使用隔离的接口／页面 fixture，不向真实平台发布文章或视频。真实账号授权与发布由软件用户在应用中操作；缺乏实际平台回执时如实记录验证范围。
 

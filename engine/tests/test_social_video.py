@@ -171,7 +171,7 @@ class VideoAdapterTests(unittest.IsolatedAsyncioTestCase):
         entry.click = AsyncMock(side_effect=click)
         page = MagicMock()
         page.locator.return_value.filter.return_value = entry
-        with self.assertRaisesRegex(RuntimeError, "fixture abort"):
+        with patch.object(video, "_channels_entry", AsyncMock(return_value=entry)), self.assertRaisesRegex(RuntimeError, "fixture abort"):
             await video._prepare(page, "channels", self.payload, self.ctx)
         entry.click.assert_awaited_once()
         self.assertEqual(len(self.events), 1)

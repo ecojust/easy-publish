@@ -33,7 +33,7 @@
     accounts: [account("a-wechat", "wechat", "品牌公众号"), account("a-zhihu", "zhihu", "创作笔记"), account("a-dayu", "dayu", "创作工作室"), account("a-douyin", "douyin", "品牌抖音"), account("a-kuaishou", "kuaishou", "品牌快手"), account("a-xhs", "xiaohongshu", "品牌小红书"), account("a-channels", "channels", "品牌视频号", "login_required"), account("a-bilibili", "bilibili", "品牌哔哩哔哩")],
     contents: [draft("c-article", "article", "把创作的时间，还给创作", "## 少一点重复，多一点表达\n\n每一篇好内容，都值得被更多人看见。\n\n当文章写完、视频剪好，接下来的分享应该简单一些。\n\n### 这一次，专注内容本身\n\n- 在一个工作空间整理素材\n- 为不同平台选择合适的账号\n- 清楚了解每个目标的发布进度\n\n**一份创作，更多可能。**"), draft("c-article-2", "article", "从灵感到第一篇文章", "写下你的第一个想法。")],
     batches: [],
-    runtime: { browserReady: true, browserInstalling: false, browserMessage: "测试浏览器已就绪", vaultReady: true, vaultMessage: "测试凭据库已就绪", version: "0.1.4" },
+    runtime: { browserReady: true, browserInstalling: false, browserMessage: "测试浏览器已就绪", vaultReady: true, vaultMessage: "测试凭据库已就绪", version: "0.1.5" },
   };
   const assets = {};
   const calls = [];
@@ -121,7 +121,7 @@
         state.batches.push(batch);
         return clone(batch);
       }
-      if (method === "POST" && path.endsWith("/cancel")) {
+      if (method === "POST" && path.startsWith("/api/batches/") && path.endsWith("/cancel")) {
         const batch = state.batches.find((entry) => entry.id === path.split("/")[3]);
         for (const task of batch.tasks) if (["queued", "running", "submitting"].includes(task.status)) { task.status = task.status === "submitting" ? "unknown" : "cancelled"; task.canRetry = task.status === "cancelled"; }
         return { ok: true };
@@ -137,9 +137,18 @@
         state.accounts.push(item);
         return clone(item);
       }
+      if (method === "POST" && path.startsWith("/api/accounts/") && path.endsWith("/cancel")) {
+        const account = state.accounts.find((entry) => entry.id === path.split("/")[3]);
+        if (account.status === "logging_in") {
+          deferredLogins.delete(account.id);
+          account.status = "login_required"; account.message = "连接已取消";
+          if (account.platformId === "bilibili") account.bilibiliCategories = [];
+        }
+        return { ok: true };
+      }
       if (method === "POST" && (path.endsWith("/login") || path.endsWith("/check"))) {
         const account = state.accounts.find((entry) => entry.id === path.split("/")[3]);
-        if (path.endsWith("/login") && deferredLogins.has(account.id)) {
+        if (deferredLogins.has(account.id)) {
           account.status = "logging_in"; account.message = "等待扫码登录（测试进度）";
         } else finishLogin(account);
         return { ok: true };

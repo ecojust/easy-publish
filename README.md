@@ -4,7 +4,7 @@
 
 面向 **macOS 13.5+（Apple Silicon / Intel）和 Windows 10+ x64**。桌面使用 Tauri 2 和系统 WebView，发布引擎随安装包提供，普通用户无需安装 Python、Node.js 或开发工具。macOS 最低版本由内置 Patchright 的 Node 24 驱动要求决定，来源见[桌面说明](docs/desktop.md)。
 
-当前版本为 `0.1.4`，安装包见 [GitHub Release](https://github.com/ecojust/easy-publish/releases/tag/v0.1.4)。已实现的平台适配使用隔离的页面与 HTTP fixture 验证，**尚未完成真实账号登录及发布验收**；网站改版、账号权限和人工验证都可能影响实际操作。
+当前版本为 `0.1.5`，安装包见 [GitHub Release](https://github.com/ecojust/easy-publish/releases/tag/v0.1.5)。已实现的平台适配使用隔离的页面与 HTTP fixture 验证，**尚未完成真实账号登录及发布验收**；网站改版、账号权限和人工验证都可能影响实际操作。
 
 ## 平台能力
 
@@ -26,13 +26,13 @@
 
 ## 安装与下载
 
-从 [Release 页面](https://github.com/ecojust/easy-publish/releases/tag/v0.1.4) 下载对应安装包：
+从 [Release 页面](https://github.com/ecojust/easy-publish/releases/tag/v0.1.5) 下载对应安装包：
 
 | 系统 | 下载 |
 | --- | --- |
-| macOS Apple Silicon（M1–M5） | [ARM DMG](https://github.com/ecojust/easy-publish/releases/download/v0.1.4/Easy-Publish_0.1.4_macos-arm64.dmg) |
-| macOS Intel | [Intel DMG](https://github.com/ecojust/easy-publish/releases/download/v0.1.4/Easy-Publish_0.1.4_macos-x64.dmg) |
-| Windows x64 | [安装程序](https://github.com/ecojust/easy-publish/releases/download/v0.1.4/Easy-Publish_0.1.4_windows-x64-setup.exe) |
+| macOS Apple Silicon（M1–M5） | [ARM DMG](https://github.com/ecojust/easy-publish/releases/download/v0.1.5/Easy-Publish_0.1.5_macos-arm64.dmg) |
+| macOS Intel | [Intel DMG](https://github.com/ecojust/easy-publish/releases/download/v0.1.5/Easy-Publish_0.1.5_macos-x64.dmg) |
+| Windows x64 | [安装程序](https://github.com/ecojust/easy-publish/releases/download/v0.1.5/Easy-Publish_0.1.5_windows-x64-setup.exe) |
 
 升级前完全退出旧版。macOS 打开 DMG，将应用拖入“应用程序”；Windows 运行安装程序。Release 同时提供 `SHA256SUMS.txt`。后续开发构建仍可从成功的 [Actions 运行](https://github.com/ecojust/easy-publish/actions/workflows/build.yml) 下载 artifact 并解压 ZIP，Actions 下载通常需要登录 GitHub。
 
@@ -43,7 +43,7 @@ macOS 请使用 0.1.1 或之后的构建。0.1.0 在部分 Mac 上会因启动�
 ## 使用流程
 
 1. 打开“设置”，查看发布浏览器和应用账号存储状态。应用会先查找已安装的 Chrome / Edge / Chromium；没有可用浏览器时，点击“下载并准备浏览器”。下载需要网络，公众号官方 API 操作本身不依赖浏览器。
-2. 在“账号管理”添加账号并连接。网页平台会打开独立的发布浏览器窗口；公众号填写开发者凭据后检查连接。
+2. 在“账号管理”添加账号并连接。抖音、小红书和视频号优先检查应用已保存的会话，需要重新登录时才打开独立浏览器；公众号填写开发者凭据后检查连接。连接期间可点击“取消连接”，等待浏览器清理后重试。
 3. 在“文章”中编写 Markdown，或导入 UTF-8 的 `.md`、`.markdown`、`.txt` 文件；使用图片按钮导入正文图片。也可以在“视频”中导入 MP4、MOV、M4V、WebM，填写标题、描述、话题及封面。最终格式、大小等要求仍由目标平台检查。
 4. 文章可选择清爽蓝、墨色杂志、暖色手记、理性科技四套模板，并切换预览目标平台。选择账号和“发布内容”或“平台草稿”，填写来源或创作声明，内容检查通过后创建任务。
 5. 在“发布任务”查看每个账号的进度与结果。任务保存创建时的内容快照，后续修改本地稿件不会改变已创建的任务。
