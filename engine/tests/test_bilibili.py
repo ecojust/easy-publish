@@ -334,7 +334,7 @@ async def test_invalid_content_never_opens_network(harness, field, value):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("options", [{"copyright": "2", "source": ""}, {"copyright": "1", "source": "https://example.org"}, {"copyright": "1", "source": " "}, {"copyright": "2", "source": "javascript:alert(1)"}, {"copyright": "2", "source": "https://user:pass@example.org"}, {"copyright": "2", "source": "https://[bad"}, {"copyright": "2", "source": "https://example.org/" + "x" * 200}, {"copyright": "3"}, {"tid": "0"}, {"unknownOption": "value"}])
+@pytest.mark.parametrize("options", [{"copyright": "2", "source": ""}, {"copyright": "2", "source": "javascript:alert(1)"}, {"copyright": "2", "source": "https://user:pass@example.org"}, {"copyright": "2", "source": "https://[bad"}, {"copyright": "2", "source": "https://example.org/" + "x" * 200}, {"copyright": "3"}, {"tid": "0"}])
 async def test_invalid_platform_options_never_open_network(harness, options):
     harness.payload.options.update(options)
     result = await bili.publish(harness.payload, harness.ctx)
@@ -356,3 +356,16 @@ async def test_unavailable_probe_line_stops_before_fence(harness):
     result = await bili.publish(harness.payload, harness.ctx)
     assert result.status == "needs_attention"
     assert not harness.events and not harness.mutations()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("source", ["https://example.org/other-platform", "not a URL", " " * 201])
+async def test_original_submission_ignores_unused_source_and_unknown_options(harness, source):
+    harness.payload.options.update(source=source, unrelatedField="other-platform-value")
+    result = await bili.publish(harness.payload, harness.ctx)
+    assert result.status == "submitted"
+    submitted = json.loads(harness.submits()[0].content)
+    assert submitted["copyright"] == 1 and submitted["source"] == ""
+    assert "unrelatedField" not in submitted
+    assert harness.payload.options["source"] == source
+    assert harness.payload.options["unrelatedField"] == "other-platform-value"

@@ -16,7 +16,7 @@
     platform("bilibili", "哔哩哔哩", "#00a1d6", ["video"], ["publish"], { titleLimit: 80, fields: [
       { key: "copyright", label: "创作类型", type: "select", required: true, kinds: ["video"], choices: [{ value: "1", label: "原创" }, { value: "2", label: "转载" }] },
       { key: "tid", label: "视频分区", type: "select", required: true, kinds: ["video"], dynamicChoices: "bilibiliCategories" },
-      { key: "source", label: "转载来源", type: "text", required: false, kinds: ["video"], hint: "转载必填，填写原始视频链接；原创请留空" },
+      { key: "source", label: "转载来源", type: "text", required: false, kinds: ["video"], hint: "转载必填，填写原始视频链接；原创会忽略此字段" },
     ] }),
   ];
   const bilibiliCategories = [{ value: "101", label: "测试分区 / 科普" }, { value: "102", label: "测试分区 / 创作" }];
@@ -26,7 +26,7 @@
     { id: "journal", name: "暖色手记", description: "暖色小标题与柔和引用，适合故事和生活记录", accent: "#b45309" },
     { id: "tech", name: "理性科技", description: "青绿色层次与清晰代码块，适合技术和产品内容", accent: "#0f766e" },
   ];
-  const account = (id, platformId, label, status = "ready") => ({ id, platformId, label, status, message: status === "ready" ? "已连接（浏览器测试替身）" : "请连接测试账号", updatedAt: date, credentialConfigured: platformId === "wechat", ...(platformId === "bilibili" ? { bilibiliCategories: status === "ready" ? clone(bilibiliCategories) : [] } : {}) });
+  const account = (id, platformId, label, status = "ready") => ({ id, platformId, label, status, defaultSelected: true, message: status === "ready" ? "已连接（浏览器测试替身）" : "请连接测试账号", updatedAt: date, credentialConfigured: platformId === "wechat", ...(platformId === "bilibili" ? { bilibiliCategories: status === "ready" ? clone(bilibiliCategories) : [] } : {}) });
   const draft = (id, kind, title, body) => ({ id, kind, title, body, description: "", tags: [], author: "", videoAssetId: null, coverAssetId: null, imageAssetIds: [], platformOptions: {}, articleTemplateId: "clean", platformPublicationStates: {}, createdAt: date, updatedAt: date, revision: 1 });
   const state = {
     platforms, articleTemplates,
@@ -136,6 +136,11 @@
         const item = account(crypto.randomUUID(), body.platformId, body.label, "login_required");
         state.accounts.push(item);
         return clone(item);
+      }
+      if (method === "PUT" && path.startsWith("/api/accounts/") && path.endsWith("/preferences")) {
+        const account = state.accounts.find((entry) => entry.id === path.split("/")[3]);
+        account.defaultSelected = body.defaultSelected;
+        return clone(account);
       }
       if (method === "POST" && path.startsWith("/api/accounts/") && path.endsWith("/cancel")) {
         const account = state.accounts.find((entry) => entry.id === path.split("/")[3]);

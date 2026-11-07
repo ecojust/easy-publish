@@ -15,6 +15,7 @@ import re
 from urllib.parse import urljoin, urlsplit
 
 from ..browser import browser_launch_options
+from ..target_projection import project_payload
 from .base import ProviderContext, ProviderResult, PublishPayload
 
 
@@ -729,6 +730,7 @@ async def check(payload: PublishPayload, ctx: ProviderContext) -> ProviderResult
 
 
 def _validate(payload: PublishPayload, platform: str) -> str | None:
+    payload = project_payload(payload, platform)
     if payload.kind != "video":
         return "该平台当前仅接入视频发布，图片笔记不能作为文章发布"
     if payload.mode == "draft" and platform != "channels":
@@ -743,8 +745,6 @@ def _validate(payload: PublishPayload, platform: str) -> str | None:
         return "此视频扩展名暂不支持，请使用 MP4、MOV 或其他支持的视频格式"
     if payload.cover_path and not Path(payload.cover_path).is_file():
         return "封面文件不存在，请重新导入"
-    if platform == "douyin" and payload.cover_path:
-        return "抖音自定义封面尚未接入；请取消自定义封面，或在平台手工设置"
     if platform == "xiaohongshu" and len(payload.tags) > 10:
         return "小红书最多支持 10 个话题；请减少话题后重试"
     return None
@@ -948,6 +948,7 @@ async def _submit_once(page, button, platform: str, payload: PublishPayload, ctx
 
 
 async def publish(payload: PublishPayload, ctx: ProviderContext) -> ProviderResult:
+    payload = project_payload(payload)
     platform = _platform(payload)
     if platform not in SITES:
         return _unavailable()

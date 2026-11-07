@@ -34,6 +34,7 @@ pub fn allowed_route(method: &str, path: &str) -> bool {
         ("POST", ["", "api", "runtime", "browser", "install"]) => true,
         ("PUT" | "DELETE", ["", "api", "contents", id]) => identifier(id),
         ("DELETE", ["", "api", "accounts", id]) => identifier(id),
+        ("PUT", ["", "api", "accounts", id, "preferences"]) => identifier(id),
         ("GET", ["", "api", "assets", id] | ["", "api", "assets", id, "preview"]) => identifier(id),
         ("POST", ["", "api", "accounts", id, "login" | "check" | "cancel"]) => identifier(id),
         ("POST", ["", "api", "batches", id, "cancel"]) => identifier(id),
@@ -98,6 +99,7 @@ mod tests {
             ("PUT", "/api/contents/id-1"),
             ("POST", "/api/accounts/abc/login"),
             ("POST", "/api/accounts/abc/cancel"),
+            ("PUT", "/api/accounts/abc/preferences"),
             ("POST", "/api/preview/article"),
             ("POST", "/api/tasks/id_1/retry"),
         ] {
@@ -116,6 +118,9 @@ mod tests {
             ("DELETE", "/api/accounts/abc/cancel"),
             ("POST", "/api/accounts//cancel"),
             ("POST", "/api/accounts/%2e%2e/cancel"),
+            ("POST", "/api/accounts/abc/preferences"),
+            ("PUT", "/api/accounts//preferences"),
+            ("PUT", "/api/accounts/%2e%2e/preferences"),
         ] {
             assert!(!allowed_route(method, path));
         }

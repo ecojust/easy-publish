@@ -37,11 +37,12 @@ class Store:
         CREATE TABLE IF NOT EXISTS assets(id TEXT PRIMARY KEY, name TEXT NOT NULL, kind TEXT NOT NULL, size INTEGER NOT NULL, mime TEXT NOT NULL, path TEXT NOT NULL, text TEXT);
         CREATE TABLE IF NOT EXISTS accounts(id TEXT PRIMARY KEY, platform TEXT NOT NULL, label TEXT NOT NULL, status TEXT NOT NULL, message TEXT NOT NULL, updated TEXT NOT NULL, configured INTEGER NOT NULL);
         CREATE TABLE IF NOT EXISTS account_metadata(account_id TEXT PRIMARY KEY, bilibili_categories TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS account_preferences(account_id TEXT PRIMARY KEY, default_selected INTEGER NOT NULL DEFAULT 1 CHECK(default_selected IN (0,1)));
         CREATE TABLE IF NOT EXISTS batches(id TEXT PRIMARY KEY, request_id TEXT UNIQUE NOT NULL, content_id TEXT NOT NULL, title TEXT NOT NULL, kind TEXT NOT NULL, mode TEXT NOT NULL, created TEXT NOT NULL, snapshot TEXT NOT NULL, selection TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS tasks(id TEXT PRIMARY KEY, batch_id TEXT NOT NULL, account_id TEXT NOT NULL, account_label TEXT NOT NULL, platform TEXT NOT NULL, status TEXT NOT NULL, message TEXT NOT NULL, remote_id TEXT, url TEXT, fence INTEGER NOT NULL DEFAULT 0, started TEXT, finished TEXT);
         CREATE INDEX IF NOT EXISTS tasks_batch ON tasks(batch_id);
         CREATE INDEX IF NOT EXISTS batches_content ON batches(content_id);
-        PRAGMA user_version=2;
+        PRAGMA user_version=3;
         """)
         self.db.commit()
 
@@ -100,10 +101,15 @@ class Store:
     def account(self, row):
         result = {"id": row["id"], "platformId": row["platform"], "label": row["label"],
                 "status": row["status"], "message": row["message"], "updatedAt": row["updated"],
-                "credentialConfigured": bool(row["configured"])}
+                "credentialConfigured": bool(row["configured"]),
+                "defaultSelected": self.account_default_selected(row["id"])}
         if row["platform"] == "bilibili":
             result["bilibiliCategories"] = self.account_categories(row["id"]) if row["status"] == "ready" else []
         return result
+
+    def account_default_selected(self, identifier):
+        row = self.one("SELECT default_selected FROM account_preferences WHERE account_id=?", (identifier,))
+        return bool(row["default_selected"]) if row else True
 
     @staticmethod
     def asset(row):

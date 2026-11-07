@@ -42,13 +42,13 @@ PLATFORMS = [
              "浏览器登录；文章需填写信息来源", "https://mp.dayu.com/", [
                  select_field("source", "信息来源", ["无需标注", "AI生成", "虚构演绎", "营销信息", "转载", "个人观点", "不适宜未成年人"]),
                  {"key": "source_url", "label": "转载原文链接", "type": "text", "required": False,
-                  "kinds": ["article"], "hint": "信息来源选择转载时必填；其他来源请留空"}]),
+                  "kinds": ["article"], "hint": "信息来源选择转载时必填；其他来源会忽略此字段"}]),
     platform("xueqiu", "雪球", "#0284c7", "article", ["draft", "publish"], 100,
              "浏览器登录；文章需填写创作声明", "https://xueqiu.com/", [
                  select_field("declaration", "创作声明", ["不添加创作声明", "本文包含AI生成内容"]),
                  select_field("visibility", "分享范围", ["公开", "私人"], False)]),
     platform("douyin", "抖音", "#18181b", "video", ["publish"], 30,
-             "浏览器登录；使用平台自动封面，暂不支持指定封面", "https://creator.douyin.com/"),
+             "浏览器登录；使用平台自动封面，会忽略稿件中的自定义封面", "https://creator.douyin.com/"),
     platform("kuaishou", "快手", "#ff5000", "video", ["publish"], 200,
              "浏览器登录；标题、描述与话题合计最多 500 字符，可指定封面", "https://cp.kuaishou.com/"),
     platform("xiaohongshu", "小红书", "#f43f5e", "video", ["publish"], 20,
@@ -63,6 +63,6 @@ PLATFORMS = [
                   "kinds": ["video"], "dynamicChoices": "bilibiliCategories",
                   "hint": "连接或验证账号后获取可用分区；多个账号使用共同可选的分区"},
                  {"key": "source", "label": "转载来源", "type": "text", "required": False,
-                  "kinds": ["video"], "hint": "转载必填，填写原始视频链接；原创请留空"}]),
+                  "kinds": ["video"], "hint": "转载必填，填写原始视频链接；原创会忽略此字段"}]),
 ]
 BY_ID = {p["id"]: p for p in PLATFORMS}

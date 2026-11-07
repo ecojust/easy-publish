@@ -42,7 +42,6 @@ def test_kuaishou_is_a_video_only_browser_target():
     ({"tags": ["含 空格"]}, "空白"),
     ({"tags": ["#话题"]}, "井号"),
     ({"tags": ["重复", "重复"]}, "重复"),
-    ({"platformOptions": {"kuaishou": {"schedule": "tomorrow"}}}, "选项无效"),
 ])
 def test_invalid_metadata_never_reaches_publishing_queue(api, tmp_path, changes, expected):
     client, runtime, _ = api
@@ -53,6 +52,25 @@ def test_invalid_metadata_never_reaches_publishing_queue(api, tmp_path, changes,
     assert any(expected in error for error in result["targets"][0]["errors"])
     assert client.post("/api/batches", json=request_batch(content, [account])).status_code == 400
     assert runtime.publish_calls == []
+
+
+def test_unused_options_are_omitted_from_queue_payload_without_changing_video_metadata(api, tmp_path):
+    client, runtime, application = api
+    account = ready_account(client, "kuaishou")
+    options = {"kuaishou": {"schedule": "tomorrow", "copyright": "2", "source": "unused"}}
+    content = video_content(client, tmp_path, platformOptions=options)
+    assert preflight(client, content, account)["ok"]
+    response = client.post("/api/batches", json=request_batch(content, [account]))
+    assert response.status_code == 200, response.text
+    assert completed_batch(client, response.json()["id"])["tasks"][0]["status"] == "published"
+    assert len(runtime.publish_calls) == 1
+    payload = runtime.publish_calls[0]
+    assert payload["options"] == {}
+    for key in ("title", "description", "tags"):
+        assert payload[key] == content[key]
+    assert payload["video_path"] == application.state.service.asset_row(content["videoAssetId"])["path"]
+    stored = application.state.service.store.content(application.state.service.content_row(content["id"]))
+    assert stored["platformOptions"] == options
 
 
 def test_combined_caption_boundary_and_four_tags_are_supported(api, tmp_path):

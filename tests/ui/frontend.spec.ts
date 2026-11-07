@@ -7,6 +7,9 @@ const fixturePath = path.resolve("tests/ui/bridge-fixture.js");
 test.beforeEach(async ({ page }) => {
   await page.exposeFunction("__renderMarkdownFixture", (body: string) => new MarkdownIt("commonmark", { html: false, breaks: true }).render(body));
   await page.addInitScript({ path: fixturePath });
+  // These existing editing/publishing cases exercise explicit target choices.
+  // Fresh-account defaults are covered separately in account-defaults.spec.ts.
+  await page.addInitScript(() => { for (const account of (window as any).__fixture.state.accounts) account.defaultSelected = false; });
 });
 
 test("article editing preserves unsaved state, imports local images and sanitizes preview", async ({ page }) => {
@@ -87,6 +90,7 @@ test("preflight blocks errors, dynamic fields persist, enqueue retries reuse req
 test("previous platform receipts default off and an explicit repeat creates a fresh batch", async ({ page }) => {
   await page.addInitScript(() => {
     const state = (window as any).__fixture.state;
+    for (const account of state.accounts) account.defaultSelected = true;
     const original = state.accounts.find((item: any) => item.id === "a-zhihu");
     state.accounts.push({ ...original, id: "a-zhihu-second", label: "另一个知乎账号" }, { ...original, id: "a-xueqiu", platformId: "xueqiu", label: "结果待核对的雪球" });
     state.batches.push({ id: "b-past", contentId: "c-article", title: state.contents[0].title, kind: "article", mode: "publish", createdAt: "2026-11-05T10:00:00Z", tasks: [
@@ -129,6 +133,7 @@ test("previous platform receipts default off and an explicit repeat creates a fr
 test("republishing video selects compatible remaining platforms and ignores platform drafts", async ({ page }) => {
   await page.addInitScript(() => {
     const state = (window as any).__fixture.state;
+    for (const account of state.accounts) account.defaultSelected = ["douyin", "kuaishou", "xiaohongshu", "channels", "bilibili"].includes(account.platformId);
     state.contents.push({ ...state.contents[0], id: "c-video-repeat", kind: "video", title: "继续分享这支视频", body: "" });
     state.batches.push(
       { id: "b-video-past", contentId: "c-video-repeat", kind: "video", mode: "publish", title: "继续分享这支视频", createdAt: "2026-11-05T10:00:00Z", tasks: [{ id: "t-video-past", accountId: "a-douyin", accountLabel: "品牌抖音", platformId: "douyin", status: "submitted", canRetry: false }] },
@@ -144,7 +149,7 @@ test("republishing video selects compatible remaining platforms and ignores plat
   await expect(target("品牌公众号")).toHaveCount(0);
   await expect(target("品牌视频号").getByRole("checkbox")).toBeDisabled();
   await page.getByRole("button", { name: "新建视频", exact: true }).click();
-  await expect(page.locator(".publish-panel:visible input:checked")).toHaveCount(0);
+  await expect(page.locator(".publish-panel:visible input:checked")).toHaveCount(4);
   await page.locator(".draft-item:visible").filter({ hasText: "继续分享这支视频" }).click();
   await expect(target("品牌快手").getByRole("checkbox")).toBeChecked();
   await target("品牌抖音").click();
@@ -384,7 +389,7 @@ test("Kuaishou is a video-only browser account and joins multi-platform publishi
   await page.getByLabel("视频描述").fill("同一支视频发布到多个平台");
   await page.getByRole("textbox", { name: "话题标签" }).fill("创作");
   await page.getByRole("textbox", { name: "话题标签" }).press("Enter");
-  await target.click();
+  await target.getByRole("checkbox").check();
   await page.locator(".publish-panel:visible .target-card").filter({ hasText: "品牌小红书" }).click();
   await page.getByRole("button", { name: "检查发布内容", exact: true }).click();
   await expect(page.getByText("发布前检查通过")).toBeVisible();
@@ -454,7 +459,7 @@ test("Bilibili video options survive reopening and reach a multi-platform batch"
   await page.getByRole("textbox", { name: "话题标签" }).fill("创作");
   await page.getByRole("textbox", { name: "话题标签" }).press("Enter");
   const target = page.locator(".publish-panel:visible .target-card").filter({ hasText: "品牌哔哩哔哩" });
-  await target.click();
+  await target.getByRole("checkbox").check();
   await expect(page.getByLabel("视频分区")).toHaveValue("");
   await page.getByLabel("视频分区").selectOption("101");
   await page.getByLabel("创作类型").selectOption("2");
@@ -463,7 +468,7 @@ test("Bilibili video options survive reopening and reach a multi-platform batch"
   await expect(page.getByRole("status").filter({ hasText: "稿件已保存" })).toBeVisible();
   await page.getByRole("button", { name: "新建视频", exact: true }).click();
   await page.locator(".draft-item:visible").filter({ hasText: "B 站批量视频测试" }).click();
-  await target.click();
+  await target.getByRole("checkbox").check();
   await page.locator(".publish-panel:visible .target-card").filter({ hasText: "品牌小红书" }).click();
   await expect(page.getByLabel("视频分区")).toHaveValue("101");
   await expect(page.getByLabel("创作类型")).toHaveValue("2");

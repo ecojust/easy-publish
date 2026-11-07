@@ -37,6 +37,7 @@ API 成功直接返回 JSON，失败为 `{"error":"公开且已脱敏的错误",
 | GET /api/assets/:id | 返回 Asset 公开元数据，不返回本地路径 |
 | GET /api/assets/:id/preview | 图片返回 `{dataUrl}` |
 | POST /api/accounts | `{platformId,label,credentials?:{appId,appSecret}}`；返回 Account |
+| PUT /api/accounts/:id/preferences | `{defaultSelected:boolean}`；严格布尔值，返回 Account，不改变登录或已创建任务 |
 | DELETE /api/accounts/:id | 删除本地账号和会话，不操作平台内容 |
 | POST /api/accounts/:id/login | 启动登录／公众号连接检查，返回 `{ok:true}`；state 轮询进度 |
 | POST /api/accounts/:id/check | 检查会话；返回 `{ok:true}` |
@@ -52,9 +53,11 @@ API 成功直接返回 JSON，失败为 `{"error":"公开且已脱敏的错误",
 
 SQLite 保存稿件、账号公开元数据、批次及各目标状态。`Content.platformPublicationStates` 从全部任务读取每个平台最新的 submitted／published／unknown 回执，不受界面最近 200 批限制；草稿和失败不覆盖历史成功。已发布稿件可以使用新的 requestId 再次投稿，同一 requestId 仍返回原批次。批次捕获不可变稿件快照、账号 ID／名称和目标，逐个目标执行，分别给出结果。已有待执行任务的账号不能被删除或重新登录。明确失败的目标可重试；成功目标不重复，结果未知的目标须先在平台核对。关闭应用后不自动重新提交未确认结果。
 
+`Account.defaultSelected` 保存在独立的 `account_preferences` 表，旧账号缺少记录时返回 true；SQLite schema 版本 3 采用加表升级。删除账号同步清理偏好，重新连接不覆盖偏好。工作台初始化按偏好、连接状态、类型／操作能力和既有投稿历史筛选；轮询保留手动选择，偏好变更只重新计算对应账号。开关不创建发布任务。
+
 `ContentInput.articleTemplateId` 为 clean／editorial／journal／tech，旧稿件默认为 clean。Markdown 保持原稿，在生成每个目标的 payload 时按模板及平台转换 HTML；预览与实际提交使用同一服务端渲染器。
 
-`ContentInput.platformOptions` 按平台 ID 保存声明等表单值；平台通过 `Platform.fields` 声明必填项、选项及提示，前端与 preflight 都校验。适配器收到当前目标的平面 `PublishPayload.options`。
+`ContentInput.platformOptions` 按平台 ID 保存声明等表单值；平台通过 `Platform.fields` 声明必填项、选项及提示，前端与 preflight 都校验。适配器收到当前目标的平面 `PublishPayload.options`。预检素材读取和实际 payload 生成共用 `target_projection.py`，在副本中移除目标不使用的字段和选项：抖音不消费自定义封面，B 站原创不消费转载来源，大鱼号非转载不消费来源链接。视频忽略文章正文和正文图片；文章忽略视频素材。原稿及批次快照保留完整输入，使用到的素材、必填项及平台长度限制继续校验。
 
 哔哩哔哩的 `copyright`、`tid`、`source` 分别表示原创／转载、投稿分区和转载来源。登录／检查连接读取账号可用分区，worker 仅返回经允许列表过滤的公开分类元数据。`Account.bilibiliCategories` 保存分区 ID 与显示名称；`PlatformField.dynamicChoices` 指向此公开选项。多个账号的界面选择使用分区交集，预检逐账号检查，投稿前再次向平台核实当前可用分区。会话、账号身份和 cookie 仍只保存在加密凭据库。
 
@@ -72,4 +75,4 @@ worker 的统一输入／输出和事件由 `engine/easy_publish/providers/base.
 
 POSIX 目录／文件要求当前用户所有且权限为 0700／0600，拒绝符号链接和不安全文件；Windows token 使用当前用户 DPAPI 保护。每次启动更换 token 和实例编号，正常退出移除对应发现文件。配置 JSON 只包含引擎路径及参数。
 
-MCP 工具复用 Service 的预检、不可变快照、账号类型限制和发布队列。省略 accountIds 时过滤已连接、支持内容类型／操作且没有历史 submitted／published／unknown 的平台；显式账号必须通过类型与预检。发布请求 UUID 在默认账号筛选之前查重，避免已成功的重试被当成新请求。详见 [MCP 接入说明](mcp.md)。
+MCP 工具复用 Service 的预检、不可变快照、账号类型限制和发布队列。省略 accountIds 时过滤 defaultSelected 为 true、已连接、支持内容类型／操作且没有历史 submitted／published／unknown 的平台；显式账号必须通过类型与预检。发布请求 UUID 在默认账号筛选之前查重，避免已成功的重试被当成新请求。详见 [MCP 接入说明](mcp.md)。

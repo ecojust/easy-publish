@@ -27,7 +27,7 @@ macOS ARM、Intel 和 Windows 安装包都提供该入口，普通用户不需�
 | `list_batches` / `get_batch` | 查询任务和平台回执，支持历史批次 |
 | `cancel_batch` | 取消未完成工作，不能撤回已产生的平台内容 |
 
-文章只允许选择文章账号，视频只允许选择视频账号。显式混选会被后端拒绝。省略 `accountIds` 时，使用已连接、支持当前内容类型和操作的账号，并排除该稿件曾有 `submitted`、`published` 或 `unknown` 结果的平台。
+文章只允许选择文章账号，视频只允许选择视频账号。显式混选会被后端拒绝。省略 `accountIds` 时，使用开启“发布时默认选中”（`defaultSelected: true`）、已连接、支持当前内容类型和操作的账号，并排除该稿件曾有 `submitted`、`published` 或 `unknown` 结果的平台。显式指定账号可覆盖默认偏好；全部兼容账号都关闭时不会回退到全选。同一 `requestId` 重试仍使用原目标，不受后续开关变化影响。
 
 ## 文章示例
 
@@ -63,7 +63,7 @@ macOS ARM、Intel 和 Windows 安装包都提供该入口，普通用户不需�
 
 ## 视频与再次发布
 
-视频先通过 `import_asset` 导入，使用 `kind: "video"`、`videoAssetId`、标题、描述、标签及可选封面保存。B 站还需要分区和原创／转载信息；`list_accounts` 返回当前账号可用分区，选项填入 `platformOptions.bilibili`。快手按页面要求完成作者声明；登录验证或平台操作仍可能需要用户在发布浏览器中处理。
+视频先通过 `import_asset` 导入，使用 `kind: "video"`、`videoAssetId`、标题、描述、标签及可选封面保存。B 站还需要分区和原创／转载信息；`list_accounts` 返回当前账号可用分区，选项填入 `platformOptions.bilibili`。同一视频可以同时填写多个平台的字段，预检与执行均只使用目标需要的字段；例如抖音忽略自定义封面，B 站原创忽略转载来源。原稿保留，真正必填的字段仍校验。快手按页面要求完成作者声明；登录验证或平台操作仍可能需要用户在发布浏览器中处理。
 
 稿件可以再次发布。自动选择会跳过有历史回执的平台；明确指定兼容账号并使用新 UUID，可创建新的发布批次。编辑原稿不会改变已创建批次的内容快照。`draft_created` 只是平台草稿，`submitted` 是已受理／待审核，`published` 是取得公开发布确认；`unknown` 必须先到平台核对，agent 不应自动重发。
 

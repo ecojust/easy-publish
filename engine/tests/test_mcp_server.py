@@ -52,7 +52,8 @@ def result_value(result):
 def test_scoped_token_cannot_reach_desktop_or_credentials_routes(mcp_api):
     client, _, _ = mcp_api
     for method, path in [("GET", "/api/state"), ("POST", "/api/shutdown"), ("POST", "/api/accounts"),
-                         ("POST", "/api/assets/import"), ("DELETE", "/api/accounts/id")]:
+                         ("POST", "/api/assets/import"), ("DELETE", "/api/accounts/id"),
+                         ("PUT", "/api/accounts/id/preferences")]:
         response = client.request(method, path, headers={"Authorization": "Bearer " + MCP_TOKEN}, json={})
         assert response.status_code == 401
     assert client.post("/api/mcp/call", json={"name": "list_platforms", "arguments": {}}).status_code == 401
@@ -114,6 +115,85 @@ def test_publish_defaults_match_kind_and_uuid_replay_does_not_repost(mcp_api):
     assert explicit["batch"]["id"] != batch["id"]
     completed_batch(client, explicit["batch"]["id"])
     assert len(runtime.publish_calls) == 2
+
+
+@pytest.mark.parametrize("kind,platform,other_platform", [("article", "zhihu", "douyin"), ("video", "douyin", "zhihu")])
+def test_account_preferences_limit_automatic_selection_but_not_explicit_targets(mcp_api, tmp_path, kind, platform, other_platform):
+    client, runtime, _ = mcp_api
+    selected = ready_account(client, platform)
+    unchecked = ready_account(client, platform)
+    opposite_kind = ready_account(client, other_platform)
+    disconnected = client.post("/api/accounts", json={"platformId": platform, "label": "Disconnected default account"}).json()
+    response = client.put(f"/api/accounts/{unchecked['id']}/preferences", json={"defaultSelected": False})
+    assert response.status_code == 200
+    if kind == "video":
+        path = tmp_path / "preference-fixture.mp4"
+        path.write_bytes(b"\x00\x00\x00\x18ftypmp42fixture-video")
+        asset = result_value(call(client, "import_asset", {"path": str(path), "kind": "video"}))["asset"]
+        content = create_content(client, kind="video", body="", videoAssetId=asset["id"])
+    else:
+        content = create_content(client)
+
+    accounts = result_value(call(client, "list_accounts", {"kind": kind}))["accounts"]
+    assert {account["id"]: account["defaultSelected"] for account in accounts} == {
+        selected["id"]: True, unchecked["id"]: False,
+    }
+    all_accounts = result_value(call(client, "list_accounts", {"kind": kind, "connectedOnly": False}))["accounts"]
+    assert disconnected["id"] in {account["id"] for account in all_accounts}
+    automatic = result_value(call(client, "preflight", {"contentId": content["id"]}))
+    assert automatic["ok"] and automatic["accountIds"] == [selected["id"]]
+    if kind == "video":
+        unsupported = call(client, "preflight", {"contentId": content["id"], "mode": "draft"})
+        assert unsupported["isError"] and unsupported["structuredContent"]["code"] == "no_eligible_accounts"
+    explicit = result_value(call(client, "preflight", {"contentId": content["id"], "accountIds": [unchecked["id"]]}))
+    assert explicit["ok"] and explicit["accountIds"] == [unchecked["id"]]
+    mismatch = call(client, "publish", {"contentId": content["id"], "accountIds": [unchecked["id"], opposite_kind["id"]], "requestId": str(uuid4())})
+    assert mismatch["isError"] and mismatch["structuredContent"]["code"] == "content_kind_mismatch"
+    assert runtime.publish_calls == []
+
+    batch = result_value(call(client, "publish", {"contentId": content["id"], "requestId": str(uuid4())}))["batch"]
+    completed_batch(client, batch["id"])
+    assert [task["accountId"] for task in batch["tasks"]] == [selected["id"]]
+    # Explicit choice overrides both the preference and the previous platform receipt.
+    explicit_batch = result_value(call(client, "publish", {"contentId": content["id"], "accountIds": [unchecked["id"]], "requestId": str(uuid4())}))["batch"]
+    completed_batch(client, explicit_batch["id"])
+    assert [task["accountId"] for task in explicit_batch["tasks"]] == [unchecked["id"]]
+    assert [payload["account_id"] for payload in runtime.publish_calls] == [selected["id"], unchecked["id"]]
+
+
+def test_automatic_selection_does_not_fall_back_when_all_compatible_preferences_are_off(mcp_api):
+    client, runtime, _ = mcp_api
+    article = ready_account(client, "zhihu")
+    ready_account(client, "douyin")
+    assert client.put(f"/api/accounts/{article['id']}/preferences", json={"defaultSelected": False}).status_code == 200
+    content = create_content(client)
+    for tool, extra in [("preflight", {}), ("publish", {"requestId": str(uuid4())})]:
+        result = call(client, tool, {"contentId": content["id"], **extra})
+        assert result["isError"] and result["structuredContent"]["code"] == "no_eligible_accounts"
+        assert "默认选中" in result["structuredContent"]["error"]
+    assert runtime.publish_calls == []
+
+
+def test_request_replay_preserves_original_targets_after_preference_changes(mcp_api):
+    client, runtime, _ = mcp_api
+    first_account = ready_account(client, "zhihu")
+    second_account = ready_account(client, "xueqiu")
+    assert client.put(f"/api/accounts/{second_account['id']}/preferences", json={"defaultSelected": False}).status_code == 200
+    content = create_content(client, platformOptions={"xueqiu": {"declaration": "不添加创作声明"}})
+    request_id = str(uuid4())
+    first = result_value(call(client, "publish", {"contentId": content["id"], "requestId": request_id}))["batch"]
+    completed_batch(client, first["id"])
+    assert client.put(f"/api/accounts/{first_account['id']}/preferences", json={"defaultSelected": False}).status_code == 200
+    assert client.put(f"/api/accounts/{second_account['id']}/preferences", json={"defaultSelected": True}).status_code == 200
+    replay = result_value(call(client, "publish", {"contentId": content["id"], "requestId": request_id}))
+    assert replay["reused"] and replay["batch"]["id"] == first["id"]
+    assert [task["accountId"] for task in replay["batch"]["tasks"]] == [first_account["id"]]
+    assert len(runtime.publish_calls) == 1
+    next_batch = result_value(call(client, "publish", {"contentId": content["id"], "requestId": str(uuid4())}))["batch"]
+    completed_batch(client, next_batch["id"])
+    assert next_batch["id"] != first["id"]
+    assert [task["accountId"] for task in next_batch["tasks"]] == [second_account["id"]]
+    assert [payload["account_id"] for payload in runtime.publish_calls] == [first_account["id"], second_account["id"]]
 
 
 def test_mixed_kind_or_disconnected_targets_never_publish(mcp_api):

@@ -16,6 +16,7 @@ from urllib.parse import urlsplit
 
 import httpx
 
+from ..target_projection import project_payload
 from .base import ProviderContext, ProviderResult, PublishPayload
 
 API_ORIGIN = "https://api.weixin.qq.com"
@@ -343,6 +344,7 @@ async def check(payload: PublishPayload, ctx: ProviderContext, *, client: httpx.
 
 async def publish(payload: PublishPayload, ctx: ProviderContext, *, client: httpx.AsyncClient | None = None,
                   poll_attempts: int = 6, poll_interval: float = 2.0) -> ProviderResult:
+    payload = project_payload(payload)
     if not 1 <= poll_attempts <= 30 or not 0 <= poll_interval <= 10:
         return ProviderResult("failed", "发布状态查询配置无效。")
     return await _run(_publish, payload, ctx, client, poll_attempts=poll_attempts, poll_interval=poll_interval)

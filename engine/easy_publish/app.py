@@ -10,7 +10,7 @@ from uuid import UUID
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, StrictBool
 
 from easy_publish.content import ContentInput, import_asset, preview_asset, render_article
 from easy_publish.catalog import BY_ID
@@ -25,6 +25,10 @@ class AccountInput(Input):
     platformId: str = Field(max_length=40)
     label: str = Field(max_length=80)
     credentials: dict[str, str] | None = None
+
+
+class AccountPreferencesInput(Input):
+    defaultSelected: StrictBool
 
 
 class AssetInput(Input):
@@ -162,6 +166,10 @@ def create_app(data_dir: Path, token: str, runtime=None, *, mcp_token: str | Non
         if value.credentials and (set(value.credentials) - {"appId", "appSecret"} or any(len(v) > 512 for v in value.credentials.values())):
             raise Problem("应用凭据格式不正确")
         return service.add_account(value.platformId, value.label, value.credentials)
+
+    @app.put("/api/accounts/{identifier}/preferences")
+    async def account_preferences(identifier: str, value: AccountPreferencesInput):
+        return service.set_account_preferences(identifier, value.defaultSelected)
 
     @app.delete("/api/accounts/{identifier}")
     async def delete_account(identifier: str):
