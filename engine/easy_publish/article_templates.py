@@ -1,7 +1,8 @@
-"""Built-in article typography and deterministic platform adaptation.
+"""Article template catalog, legacy typography and native-platform adaptation.
 
-Only this module supplies CSS. Markdown HTML stays disabled; no user-supplied
-style, script, external font or template code is evaluated.
+Official Wenyan templates render asynchronously through wenyan_runtime. The old
+six template IDs keep their original output for saved choices and batch snapshots.
+Markdown HTML stays disabled; user CSS and template code are never evaluated.
 """
 from __future__ import annotations
 
@@ -14,8 +15,10 @@ import bleach
 from markdown_it import MarkdownIt
 
 
-ArticleTemplateId = Literal["clean", "editorial", "journal", "tech", "forest", "artdeco"]
-ARTICLE_TEMPLATES = [
+ArticleTemplateId = Literal["clean", "editorial", "journal", "tech", "forest", "artdeco",
+                            "wenyan-default", "wenyan-orangeheart", "wenyan-rainbow", "wenyan-lapis",
+                            "wenyan-pie", "wenyan-maize", "wenyan-purple", "wenyan-phycat"]
+LEGACY_ARTICLE_TEMPLATES = [
     {"id": "clean", "name": "清爽蓝", "description": "蓝色章节条、清晰列表与留白，适合知识分享", "accent": "#2563eb"},
     {"id": "editorial", "name": "墨色杂志", "description": "米白纸面、衬线标题与双线装饰，适合深度阅读", "accent": "#9a3412"},
     {"id": "journal", "name": "暖色手记", "description": "暖色标题卡、圆角引用与照片边框，适合生活记录", "accent": "#b45309"},
@@ -23,6 +26,18 @@ ARTICLE_TEMPLATES = [
     {"id": "forest", "name": "森林来信", "description": "浅绿纸面、圆角边框与柔和强调，适合自然和人文", "accent": "#2f6b4f"},
     {"id": "artdeco", "name": "黑金画报", "description": "黑金标题带、几何边框与高对比引用，适合专题策划", "accent": "#b7791f"},
 ]
+WENYAN_ARTICLE_TEMPLATES = [
+    {"id": "wenyan-default", "name": "默认经典", "description": "Wenyan 官方默认主题，清晰简洁的文章排版", "accent": "#000000"},
+    {"id": "wenyan-orangeheart", "name": "橙心", "description": "Wenyan Orange Heart，温暖醒目的橙色主题", "accent": "#ef7060"},
+    {"id": "wenyan-rainbow", "name": "彩虹", "description": "Wenyan Rainbow，丰富的章节色彩", "accent": "#e26d6d"},
+    {"id": "wenyan-lapis", "name": "青金石", "description": "Wenyan Lapis，沉静的蓝色阅读主题", "accent": "#4870ac"},
+    {"id": "wenyan-pie", "name": "思源", "description": "Wenyan Pie，简约有序的内容排版", "accent": "#3b5368"},
+    {"id": "wenyan-maize", "name": "玉米", "description": "Wenyan Maize，明快柔和的暖色主题", "accent": "#f2c94c"},
+    {"id": "wenyan-purple", "name": "紫色", "description": "Wenyan Purple，鲜明的紫色层次", "accent": "#7c4dff"},
+    {"id": "wenyan-phycat", "name": "物理猫", "description": "Wenyan Phycat，精致的文章装饰与排版", "accent": "#00b2ff"},
+]
+WENYAN_TEMPLATE_IDS = frozenset(item["id"] for item in WENYAN_ARTICLE_TEMPLATES)
+ARTICLE_TEMPLATES = WENYAN_ARTICLE_TEMPLATES + LEGACY_ARTICLE_TEMPLATES
 TEMPLATE_IDS = frozenset(item["id"] for item in ARTICLE_TEMPLATES)
 ARTICLE_PLATFORMS = frozenset({"wechat", "zhihu", "dayu", "xueqiu"})
 
@@ -384,17 +399,28 @@ class _Renderer:
         return self.element(tag, self.children(node, depth), attrs)
 
 
+def markdown_html(body: str) -> str:
+    """Parse safe Markdown structure without starting a typography runtime."""
+    markdown = MarkdownIt("commonmark", {"html": False, "breaks": True}).enable(["table", "strikethrough"])
+    raw = markdown.render(body)
+    return bleach.clean(raw, tags=_TAGS,
+                        attributes={"a": ["href", "title"], "img": ["src", "alt", "title"], "ol": ["start"]},
+                        protocols={"https", "http", "mailto", "easy-asset"}, strip=True)
+
+
 def render_article(body: str, template_id: str = "clean", platform_id: str | None = None) -> str:
+    """Legacy typography and native-platform adaptation; Wenyan is asynchronous."""
     if template_id not in TEMPLATE_IDS:
         raise ValueError("文章模板不存在，请重新选择")
     if platform_id is not None and platform_id not in ARTICLE_PLATFORMS:
         raise ValueError("此平台不支持文章格式转换")
-    markdown = MarkdownIt("commonmark", {"html": False, "breaks": True}).enable(["table", "strikethrough"])
-    raw = markdown.render(body)
-    safe = bleach.clean(raw, tags=_TAGS,
-                        attributes={"a": ["href", "title"], "img": ["src", "alt", "title"], "ol": ["start"]},
-                        protocols={"https", "http", "mailto", "easy-asset"}, strip=True)
-    document = _Document(safe)
+    if template_id in WENYAN_TEMPLATE_IDS:
+        if platform_id in {None, "wechat"}:
+            raise ValueError("Wenyan 模板需要通过文章预览服务渲染")
+        # Native editors control their own typography; retain the established
+        # safe platform structure instead of carrying WeChat theme CSS across.
+        template_id = "clean"
+    document = _Document(markdown_html(body))
     renderer = _Renderer(template_id, platform_id)
     content = renderer.render(document.root)
     if not content.strip():

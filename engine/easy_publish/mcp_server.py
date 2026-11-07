@@ -153,7 +153,7 @@ def _select_accounts(service, content: dict, identifiers: list[str] | None, mode
 async def execute_tool(service, data_dir: Path, name: str, arguments: dict) -> dict:
     """Called inside the desktop engine after scoped MCP authentication."""
     from .catalog import BY_ID, PLATFORMS
-    from .content import import_asset, render_article
+    from .content import import_asset
     from .service import Problem, require
 
     model = MODELS.get(name)
@@ -195,7 +195,7 @@ async def execute_tool(service, data_dir: Path, name: str, arguments: dict) -> d
             service.store.execute("INSERT INTO assets VALUES (?,?,?,?,?,?,?)", tuple(row[key] for key in ("id", "name", "kind", "size", "mime", "path", "text")))
             value = {"asset": service.store.asset(row)}
         elif name == "preview_article":
-            value = service.preview_article(values.body, values.articleTemplateId, values.platformId, values.accountId)
+            value = await service.preview_article(values.body, values.articleTemplateId, values.platformId, values.accountId)
         elif name in {"preflight", "publish"}:
             # Resolve replay before default filtering: after a successful first
             # attempt its platforms are intentionally no longer auto-selected,

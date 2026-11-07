@@ -1,4 +1,5 @@
 """One shared draft is projected separately before each target reads assets."""
+import asyncio
 import copy
 import json
 from pathlib import Path
@@ -75,7 +76,7 @@ def test_missing_cover_only_blocks_targets_that_use_it(bili_api, tmp_path, using
     # Even a disappeared asset row is irrelevant to the Douyin target.
     service.store.execute('DELETE FROM assets WHERE id=?', (cover,))
     with patch.object(service, 'asset_row', wraps=service.asset_row) as read:
-        payload = service.payload(content, {'platform': 'douyin', 'account_id': douyin['id']}, 'publish')
+        payload = asyncio.run(service.payload(content, {'platform': 'douyin', 'account_id': douyin['id']}, 'publish'))
     assert payload['cover_path'] is None
     assert all(call.args != (cover,) for call in read.call_args_list)
     assert preflight(client, content, [douyin])['ok']
@@ -100,7 +101,7 @@ def test_article_targets_ignore_video_and_unused_cover_but_keep_real_requirement
     assert preflight(client, content, [dayu, zhihu])['ok']
     assert not preflight(client, content, [xueqiu])['ok']  # Xueqiu consumes this cover.
     task = {'platform': 'dayu', 'account_id': dayu['id']}
-    payload = service.payload(content, task, 'publish')
+    payload = asyncio.run(service.payload(content, task, 'publish'))
     assert payload['video_path'] is None and payload['cover_path'] is None and payload['tags'] == []
     assert payload['author'] == '作者' and payload['options'] == {'source': '个人观点'}
     original = copy.deepcopy(content)

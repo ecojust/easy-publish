@@ -26,7 +26,7 @@ export default function AccountsPage({ accounts, articleTemplates, platforms, ru
   const [busy, setBusy] = useState<string | null>(null);
   const [deleteAccount, setDeleteAccount] = useState<Account | null>(null);
   const [templateAccount, setTemplateAccount] = useState<Account | null>(null);
-  const [templateId, setTemplateId] = useState<ArticleTemplateId>("clean");
+  const [templateId, setTemplateId] = useState<ArticleTemplateId>("wenyan-default");
   const operation = useRef(false);
   const platform = platforms.find((item) => item.id === platformId);
   const displayed = accounts.filter((account) => filter === "all" || platforms.find((item) => item.id === account.platformId)?.kinds.includes(filter));
@@ -85,7 +85,7 @@ export default function AccountsPage({ accounts, articleTemplates, platforms, ru
             onNotice(defaultSelected ? "已设为默认发布账号。" : "已关闭此账号的默认发布。");
           });
         }} /></label>
-        {account.platformId === "wechat" && <button className="account-template-button" aria-label={`设置 ${account.label} 文章模板`} disabled={!!busy} onClick={() => { setTemplateAccount(account); setTemplateId(account.wechatTemplateId || "clean"); setError(null); }}><FileText size={14} /><span>文章模板</span><strong>{articleTemplates.find((template) => template.id === (account.wechatTemplateId || "clean"))?.name || "清爽蓝"}</strong><ArrowUpRight size={13} /></button>}
+        {account.platformId === "wechat" && <button className="account-template-button" aria-label={`设置 ${account.label} 文章模板`} disabled={!!busy} onClick={() => { setTemplateAccount(account); setTemplateId(account.wechatTemplateId || "wenyan-default"); setError(null); }}><FileText size={14} /><span>文章模板</span><strong>{articleTemplates.find((template) => template.id === (account.wechatTemplateId || "wenyan-default"))?.name || "默认经典"}</strong><ArrowUpRight size={13} /></button>}
         <div className="account-card-actions">{account.status === "logging_in" ? <button className="button small" disabled={!!busy} onClick={() => perform(`cancel:${account.id}`, async () => { await request("POST", `/api/accounts/${account.id}/cancel`); await onRefresh(); onNotice("连接操作已结束。"); })}>{busy === `cancel:${account.id}` ? <Spinner size={14} /> : <X size={14} />}取消连接</button> : <button className={`button small ${account.status !== "ready" ? "primary" : ""}`} disabled={!!busy || (item?.auth === "browser" && !runtime.browserReady)} onClick={() => perform(`login:${account.id}`, async () => { await request("POST", `/api/accounts/${account.id}/login`); await onRefresh(); onNotice(item?.auth === "wechat_api" ? "已开始检查公众号连接。" : "正在检查应用保存的会话，需要登录时会打开浏览器。"); })}>{busy === `login:${account.id}` ? <Spinner size={14} /> : <Link2 size={14} />}{account.status === "ready" ? "重新连接" : item?.auth === "wechat_api" ? "检查连接" : "登录账号"}</button>}
           <div><button className="icon-button" aria-label={`检查 ${account.label} 连接`} title="检查连接状态" disabled={!!busy || account.status === "logging_in"} onClick={() => perform(`check:${account.id}`, async () => { await request("POST", `/api/accounts/${account.id}/check`); await onRefresh(); onNotice("已请求检查账号状态。"); })}>{busy === `check:${account.id}` ? <Spinner size={15} /> : <RefreshCw size={15} />}</button><button className="icon-button" aria-label={`打开 ${item?.name || "平台"}`} title="打开创作平台" onClick={() => perform(`open:${account.id}`, async () => { if (item) await bridge().openExternal(item.homeUrl); })} disabled={!!busy}><ExternalLink size={15} /></button><button className="icon-button danger-hover" aria-label={`移除账号 ${account.label}`} title="移除本地账号" onClick={() => { setDeleteAccount(account); setError(null); }} disabled={!!busy}><Trash2 size={15} /></button></div>
         </div>
@@ -94,7 +94,7 @@ export default function AccountsPage({ accounts, articleTemplates, platforms, ru
     <div className="privacy-note"><ShieldCheck size={16} /><p>登录会话保存在本机。公众号凭据加密保存，界面不会回显 AppSecret。</p></div>
 
     {templateAccount && <Modal title={`${templateAccount.label} · 文章模板`} onClose={() => setTemplateAccount(null)} busy={!!busy}>
-      <p className="modal-description">为这个公众号选择文章版式，预览与发布会使用相同模板。</p><InlineError message={error} />
+      <p className="modal-description">选择 Wenyan 文章模板，预览与微信公众号发送使用同一份排版。原有模板仍可选择。</p><InlineError message={error} />
       <div className="template-options" role="group" aria-label="公众号文章模板">{articleTemplates.map((template) => <button type="button" key={template.id} className={`template-option ${templateId === template.id ? "selected" : ""}`} aria-pressed={templateId === template.id} disabled={!!busy} onClick={() => setTemplateId(template.id)}><ArticleTemplateThumbnail templateId={template.id} /><span><strong>{template.name}</strong><small>{template.description}</small></span>{templateId === template.id && <Check size={14} />}</button>)}</div>
       <div className="modal-actions"><button className="button" disabled={!!busy} onClick={() => setTemplateAccount(null)}>取消</button><button className="button primary" disabled={!!busy} onClick={() => perform(`template:${templateAccount.id}`, async () => { await request<Account>("PUT", `/api/accounts/${templateAccount.id}/preferences`, { wechatTemplateId: templateId }); await onRefresh(); setTemplateAccount(null); onNotice("公众号模板已保存。"); })}>{busy && <Spinner size={16} />}保存模板</button></div>
     </Modal>}

@@ -72,7 +72,8 @@ def test_tool_capabilities_accounts_and_templates_are_kind_scoped(mcp_api):
     runtime.vault.put(article["id"], "session", b"private-cookie-never-exposed")
     platforms = result_value(call(client, "list_platforms", {"kind": "article"}))
     assert all("article" in p["kinds"] for p in platforms["platforms"])
-    assert {p["id"] for p in platforms["articleTemplates"]} == {"clean", "editorial", "journal", "tech", "forest", "artdeco"}
+    from easy_publish.article_templates import TEMPLATE_IDS
+    assert {p["id"] for p in platforms["articleTemplates"]} == TEMPLATE_IDS
     accounts = result_value(call(client, "list_accounts", {"kind": "article"}))["accounts"]
     assert [a["id"] for a in accounts] == [article["id"]]
     assert video["id"] not in json.dumps(accounts)
@@ -404,7 +405,8 @@ def test_real_stdio_initialize_discovery_and_scoped_tool_call(tmp_path):
     tools = {tool["name"]: tool for tool in responses[1]["result"]["tools"]}
     assert tools["publish"]["annotations"]["destructiveHint"] is True
     assert "requestId" in tools["publish"]["inputSchema"]["required"]
-    assert set(tools["preview_article"]["inputSchema"]["properties"]["articleTemplateId"]["enum"]) == {"clean", "editorial", "journal", "tech", "forest", "artdeco"}
+    from easy_publish.article_templates import TEMPLATE_IDS
+    assert set(tools["preview_article"]["inputSchema"]["properties"]["articleTemplateId"]["enum"]) == TEMPLATE_IDS
     assert responses[2]["result"]["structuredContent"] == {"accounts": [], "kind": "article"}
     assert responses[3]["result"]["isError"] is True
     assert len(calls) == 1

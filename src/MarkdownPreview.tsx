@@ -48,16 +48,26 @@ export function AssetImage({ id, alt, className }: { id: string; alt: string; cl
   return preview ? <img src={preview} alt={alt} className={className} /> : <span className="image-loading">图片预览加载中</span>;
 }
 
-const templateStyle = /^(?:color|background-color|font-(?:family|size|weight|style)|line-height|letter-spacing|text-align|text-decoration(?:-(?:line|style|color|thickness))?|margin(?:-(?:top|right|bottom|left))?|padding(?:-(?:top|right|bottom|left))?|border(?:-(?:top|right|bottom|left))?(?:-(?:width|style|color))?|border-(?:(?:top|bottom)-(?:left|right)-)?radius|border-collapse|max-width|width|height|box-sizing|box-shadow|word-break|overflow-wrap|white-space(?:-collapse)?|text-wrap-mode|list-style-type)$/;
+const templateStyle = /^(?:color|caret-color|background(?:-(?:color|image|size|position(?:-[xy])?|attachment|repeat|clip|origin))?|font(?:-(?:family|size|weight|style|variant))?|line-height|letter-spacing|word-spacing|text-align|text-indent|text-shadow|text-transform|text-decoration(?:-(?:line|style|color|thickness))?|margin(?:-(?:top|right|bottom|left))?|padding(?:-(?:top|right|bottom|left))?|border(?:-(?:top|right|bottom|left))?(?:-(?:width|style|color))?|border-(?:(?:top|bottom)-(?:left|right)-)?radius|border-image(?:-(?:source|slice|width|outset|repeat))?|border-collapse|border-spacing|(?:min-|max-)?(?:width|height)|box-sizing|box-shadow|word-break|word-wrap|overflow-wrap|overflow(?:-[xy])?|white-space(?:-collapse)?|text-wrap-mode|list-style(?:-(?:type|position))?|vertical-align|opacity|cursor|transition(?:-(?:property|duration|timing-function|delay|behavior))?|float|clear|flex(?:-(?:direction|wrap|grow|shrink|basis))?|justify-content|align-(?:items|self|content)|(?:row-|column-)?gap|transform(?:-origin)?|top|right|bottom|left)$/;
 const assetIdentifier = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function sanitizeArticleHtml(html: string) {
-  const clean = DOMPurify.sanitize(html, { USE_PROFILES: { html: true }, ALLOWED_URI_REGEXP: /^(?:(?:https?|mailto|tel|easy-asset):|[^a-z]|[a-z+.-]+(?:[^a-z+.\-:]|$))/i, FORBID_TAGS: ["style", "form", "input", "iframe", "video", "audio", "svg", "math", "object", "embed", "link", "meta"], FORBID_ATTR: ["srcset"] });
+  const clean = DOMPurify.sanitize(html, { USE_PROFILES: { html: true, svg: true }, ALLOWED_URI_REGEXP: /^(?:(?:https?|mailto|tel|easy-asset):|[^a-z]|[a-z+.-]+(?:[^a-z+.\-:]|$))/i, FORBID_TAGS: ["style", "form", "input", "iframe", "video", "audio", "math", "object", "embed", "link", "meta"], FORBID_ATTR: ["srcset"] });
   const document = new DOMParser().parseFromString(clean, "text/html");
+  // Wenyan's code-block decoration contains a static SVG with three circles.
+  // Retain geometry and colors, never SVG links, animation or foreign content.
+  const svgTags = new Set(["svg", "g", "circle", "ellipse", "rect", "path", "line", "polyline", "polygon", "title", "desc"]);
+  const svgAttributes = new Set(["xmlns", "viewBox", "width", "height", "x", "y", "x1", "x2", "y1", "y2", "cx", "cy", "r", "rx", "ry", "d", "points", "fill", "stroke", "stroke-width", "fill-rule", "stroke-linecap", "stroke-linejoin", "opacity", "transform", "style", "aria-hidden"]);
+  for (const element of document.querySelectorAll("svg, svg *")) {
+    if (!svgTags.has(element.localName)) { element.remove(); continue; }
+    for (const attribute of [...element.attributes]) {
+      if (!svgAttributes.has(attribute.name) || /url\s*\(|expression|@|\/\*|\\|<|>/i.test(attribute.value)) element.removeAttribute(attribute.name);
+    }
+  }
   for (const element of document.querySelectorAll<HTMLElement>("[style]")) {
     for (const property of [...element.style]) {
       const value = element.style.getPropertyValue(property);
-      const layout = (property === "display" && ["block", "inline-block"].includes(value)) || (property === "table-layout" && value === "fixed");
+      const layout = (property === "display" && ["block", "inline-block", "inline", "flex", "inline-flex", "table", "table-cell", "list-item"].includes(value)) || (property === "position" && ["relative", "absolute", "static"].includes(value)) || (property === "table-layout" && ["fixed", "auto"].includes(value));
       if ((!templateStyle.test(property) && !layout) || /url\s*\(|expression|@|\/\*|\\|<|>/i.test(value)) element.style.removeProperty(property);
     }
     if (!element.style.length) element.removeAttribute("style");
@@ -156,7 +166,7 @@ export default function MarkdownPreview({ source, assetIds, templateId, platform
   if (loading) return <div className="preview-loading" role="status"><Spinner />正在生成文章预览…</div>;
   if (failure) return <div className="preview-failure" role="alert"><p>文章预览暂时不可用：{failure}</p><button className="button small" type="button" onClick={() => setRetry((value) => value + 1)}>重新生成预览</button></div>;
 
-  return <>{rendered.notes.length > 0 && <div className="preview-notes">{rendered.notes.map((note) => <p key={note}>{note}</p>)}</div>}<div className="markdown-preview" onClick={(event) => {
+  return <>{rendered.notes.length > 0 && <div className="preview-notes">{rendered.notes.map((note) => <p key={note}>{note}</p>)}</div>}<div className={`markdown-preview${templateId.startsWith("wenyan-") && (!platformId || platformId === "wechat") ? " wenyan-preview" : ""}`} onClick={(event) => {
     const link = (event.target as HTMLElement).closest("a");
     if (link) {
       event.preventDefault();

@@ -1,6 +1,6 @@
 # 桌面外壳与安装包
 
-Easy Publish 使用 Tauri 2 系统 WebView。macOS ARM、macOS Intel 与 Windows x64 分别构建原生安装包，版本为 `0.1.7`。macOS 最低为 13.5；Windows 为 Windows 10／11 x64。该下限匹配内置 Patchright 驱动的 [Node.js 24 系统要求](https://github.com/nodejs/node/blob/v24.13.0/BUILDING.md#platform-list)。Python 3.12 发布引擎由 PyInstaller 打包并随应用安装，另内置 OpenCode 1.19.5 用于原文整理，用户无需安装 Python 或 OpenCode。发布浏览器由引擎管理，首次使用在应用中准备。
+Easy Publish 使用 Tauri 2 系统 WebView。macOS ARM、macOS Intel 与 Windows x64 分别构建原生安装包，版本为 `0.1.8`。macOS 最低为 13.5；Windows 为 Windows 10／11 x64。该下限匹配内置 Patchright 驱动的 [Node.js 24 系统要求](https://github.com/nodejs/node/blob/v24.13.0/BUILDING.md#platform-list)。Python 3.12 发布引擎由 PyInstaller 打包并随应用安装，另内置 OpenCode 1.19.5 用于原文整理，另内置 Wenyan 官方排版核心并复用已有 Node 驱动，用户无需安装 Python、Node.js、Wenyan CLI 或 OpenCode。发布浏览器由引擎管理，首次使用在应用中准备。
 
 ## 开发
 
@@ -12,6 +12,7 @@ python -m venv .venv
 .venv/bin/python -m pip install -r engine/requirements.txt
 # Windows 请改用 .venv\Scripts\python.exe
 npm ci
+npm run prepare:wenyan
 python scripts/prepare-opencode.py
 npm run desktop:dev
 ```
@@ -24,6 +25,7 @@ npm run desktop:dev
 
 ```sh
 python -m pip install -r engine/requirements.txt pyinstaller==6.22.3
+npm run prepare:wenyan
 python scripts/build-engine.py
 python scripts/prepare-opencode.py
 python scripts/smoke-engine.py src-tauri/binaries/easy-publish-engine-<Rust target triple>
@@ -72,3 +74,7 @@ cargo fmt --manifest-path src-tauri/Cargo.toml --check
 确认三个目标的构建和启动检查通过后，将相同应用源码合并到 master 并建立版本 tag。手动触发 `.github/workflows/release.yml`，指定版本 tag、成功构建 run ID 和精确的构建源提交。发布脚本要求 tag 指向当前 checkout，版本一致，除明确允许的发布文档、历史记录和发布脚本外，文件树与构建源一致。
 
 流程下载并验证三个 artifact ZIP 的 SHA-256，仅提取对应的唯一安装器，生成 `SHA256SUMS.txt`，完整上传 draft 后再公开 Release。已公开版本不会被覆盖；Release 说明位于 `docs/releases/`。应用签名、最低系统和真实平台验收范围仍以上文为准。
+
+## Wenyan 本地排版
+
+`runtime/wenyan` 独立锁定官方核心及渲染依赖，`npm run prepare:wenyan` 生成供引擎使用的分发文件。冻结构建将其收集进引擎，运行时复用 Patchright 自带的 Node，使用受限 JSON 输入输出；不调用全局 npm 或用户安装的 CLI。预览与微信公众号发送共用渲染结果，其他文章平台仍按编辑器能力转换。原生安装包检查通过 MCP 实际渲染 Wenyan 主题，验证脱离开发环境也能排版。

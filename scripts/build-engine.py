@@ -76,6 +76,9 @@ def main() -> None:
     entry_module = ROOT / "engine/easy_publish/__main__.py"
     if not entry_module.is_file():
         parser.error("The engine entry point is missing.")
+    wenyan = ROOT / "runtime/wenyan/dist"
+    if not (wenyan / "render.cjs").is_file():
+        parser.error("The bundled Wenyan renderer is missing. Run npm run prepare:wenyan first.")
     suffix = ".exe" if os.name == "nt" else ""
     destination = ROOT / "src-tauri/binaries" / f"easy-publish-engine-{target}{suffix}"
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -99,6 +102,7 @@ def main() -> None:
             "--workpath", str(scratch_path / "work"), "--specpath", str(scratch_path),
             # Includes Patchright's platform-specific Node driver and package data.
             "--collect-all", "patchright", "--collect-all", "easy_publish",
+            "--add-data", f"{wenyan}{os.pathsep}easy_publish/vendor/wenyan",
             # Account keys live only in the application's private data directory.
             "--exclude-module", "keyring",
             # Uvicorn resolves protocol and event-loop implementations by module name.

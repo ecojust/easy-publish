@@ -9,11 +9,12 @@ from urllib.parse import urlsplit
 
 from easy_publish.article_formatting import ArticleFormattingMixin, format_ready, saved_article_input
 from easy_publish.catalog import BY_ID, PLATFORMS, bilibili_categories
-from easy_publish.article_templates import TEMPLATE_IDS, article_format_notes
-from easy_publish.content import ContentInput, image_sources, render_article
+from easy_publish.article_templates import TEMPLATE_IDS, WENYAN_TEMPLATE_IDS, article_format_notes
+from easy_publish.content import ContentInput, image_sources, markdown_html, render_article
 from easy_publish.target_projection import project_content
 from easy_publish.store import Store, dump, now, uid
 from easy_publish.vault import VaultError
+from easy_publish.wenyan_runtime import WenyanError, WenyanRenderer
 
 
 _UNSET = object()
@@ -40,6 +41,7 @@ class Service(ArticleFormattingMixin):
         self.queue_task = None
         self.closing = False
         self._init_formatting(formatter)
+        self.wenyan = WenyanRenderer()
 
     async def start(self):
         self.store.recover()
@@ -68,6 +70,7 @@ class Service(ArticleFormattingMixin):
     async def close(self):
         self.closing = True
         await self.close_formatting()
+        await self.wenyan.close()
         await self.runtime.shutdown()
         for task in [self.queue_task, *self.jobs.values()]:
             if task and not task.cancelling():
@@ -142,6 +145,9 @@ class Service(ArticleFormattingMixin):
             raise Problem("浏览器账号不接受应用密钥")
         self.store.execute("INSERT INTO accounts VALUES (?,?,?,?,?,?,?)",
                            (identifier, platform_id, label.strip(), "login_required", "请连接账号", now(), int(platform["auth"] == "wechat_api")))
+        if platform_id == "wechat":
+            self.store.execute("INSERT INTO account_preferences(account_id,default_selected,wechat_template_id) VALUES (?,1,?)",
+                               (identifier, "wenyan-default"))
         return self.store.account(self.account_row(identifier))
 
     def set_account_preferences(self, identifier, default_selected=_UNSET, wechat_template_id=_UNSET):
@@ -163,7 +169,15 @@ class Service(ArticleFormattingMixin):
                        (identifier, int(selected), template))
         return self.store.account(account)
 
-    def preview_article(self, body, template="clean", platform=None, account_id=None):
+    async def _render_article(self, body, template, platform):
+        if template in WENYAN_TEMPLATE_IDS and platform in {None, "wechat"}:
+            try:
+                return await self.wenyan.render(body, template.removeprefix("wenyan-"))
+            except WenyanError as error:
+                raise Problem(str(error), "article_render_failed", 503) from None
+        return render_article(body, template, platform)
+
+    async def preview_article(self, body, template="clean", platform=None, account_id=None):
         if account_id is not None:
             account = self.account_row(account_id)
             if account["platform"] != "wechat" or platform not in {None, "wechat"}:
@@ -173,7 +187,7 @@ class Service(ArticleFormattingMixin):
             raise Problem("请选择支持文章的平台")
         if template not in TEMPLATE_IDS:
             raise Problem("文章模板不存在，请重新选择")
-        return {"html": render_article(body, template, platform), "notes": article_format_notes(platform)}
+        return {"html": await self._render_article(body, template, platform), "notes": article_format_notes(platform)}
 
     def delete_account(self, identifier):
         self.account_row(identifier)
@@ -287,7 +301,7 @@ class Service(ArticleFormattingMixin):
                 ids = [(content.get("videoAssetId"), "video"), (content.get("coverAssetId"), "image")]
                 ids += [(i, "image") for i in content["imageAssetIds"]]
                 if content["kind"] == "article":
-                    for source in image_sources(render_article(content["body"])):
+                    for source in image_sources(markdown_html(content["body"])):
                         if not source.startswith("easy-asset://"):
                             errors.append("正文图片需导入素材库后插入，不支持外部图片地址")
                         else:
@@ -409,7 +423,7 @@ class Service(ArticleFormattingMixin):
         self.wake.set()
         return self.store.batch(self.store.one("SELECT * FROM batches WHERE id=?", (identifier,)))
 
-    def payload(self, content, task, mode):
+    async def payload(self, content, task, mode):
         content = project_content(content, task["platform"])
         template = content.get("articleTemplateId", "clean")
         # New batches freeze each WeChat account's setting. An absent map marks
@@ -423,9 +437,9 @@ class Service(ArticleFormattingMixin):
             return self.asset_row(identifier)["path"] if identifier else None
         images = set(content["imageAssetIds"])
         if content["kind"] == "article":
-            images |= {s.removeprefix("easy-asset://") for s in image_sources(render_article(content["body"])) if s.startswith("easy-asset://")}
+            images |= {s.removeprefix("easy-asset://") for s in image_sources(markdown_html(content["body"])) if s.startswith("easy-asset://")}
         return {"platform_id": task["platform"], "account_id": task["account_id"], "kind": content["kind"], "mode": mode,
-                "title": content["title"].strip(), "body_html": render_article(content["body"], template, task["platform"]) if content["kind"] == "article" else "",
+                "title": content["title"].strip(), "body_html": await self._render_article(content["body"], template, task["platform"]) if content["kind"] == "article" else "",
                 "description": content["description"], "tags": content["tags"], "author": content["author"],
                 "video_path": asset_path(content["videoAssetId"]), "cover_path": asset_path(content["coverAssetId"]),
                 "images": {i: asset_path(i) for i in images}, "options": content.get("platformOptions", {}).get(task["platform"], {})}
@@ -459,10 +473,12 @@ class Service(ArticleFormattingMixin):
             if not check["ok"]:
                 result = {"status": "failed", "message": "；".join(check["targets"][0]["errors"])}
             else:
-                result = await self.runtime.run("publish", self.payload(content, task, batch["mode"]), event, identifier)
+                result = await self.runtime.run("publish", await self.payload(content, task, batch["mode"]), event, identifier)
         except asyncio.CancelledError:
             self.interrupt_task(identifier)
             raise
+        except Problem as error:
+            result = {"status": "failed", "message": error.message}
         except Exception:
             result = {"status": "failed", "message": "发布引擎未完成，请检查账号和运行环境"}
         current = self.store.one("SELECT * FROM tasks WHERE id=?", (identifier,))

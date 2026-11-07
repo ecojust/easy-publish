@@ -8,7 +8,7 @@ from typing import Literal
 from PIL import Image
 from pydantic import BaseModel, ConfigDict, Field
 
-from easy_publish.article_templates import ArticleTemplateId, render_article
+from easy_publish.article_templates import ArticleTemplateId, markdown_html, render_article
 from easy_publish.store import uid
 
 

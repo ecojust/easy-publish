@@ -4,7 +4,7 @@
 
 面向 **macOS 13.5+（Apple Silicon / Intel）和 Windows 10+ x64**。桌面使用 Tauri 2 和系统 WebView，发布引擎随安装包提供，普通用户无需安装 Python、Node.js 或开发工具。macOS 最低版本由内置 Patchright 的 Node 24 驱动要求决定，来源见[桌面说明](docs/desktop.md)。
 
-当前版本为 `0.1.7`，安装包见 [GitHub Release](https://github.com/ecojust/easy-publish/releases/tag/v0.1.7)。已实现的平台适配使用隔离的页面与 HTTP fixture 验证，**尚未完成真实账号登录及发布验收**；网站改版、账号权限和人工验证都可能影响实际操作。
+当前版本为 `0.1.8`，安装包见 [GitHub Release](https://github.com/ecojust/easy-publish/releases/tag/v0.1.8)。已实现的平台适配使用隔离的页面与 HTTP fixture 验证，**尚未完成真实账号登录及发布验收**；网站改版、账号权限和人工验证都可能影响实际操作。
 
 ## 平台能力
 
@@ -26,13 +26,13 @@
 
 ## 安装与下载
 
-从 [Release 页面](https://github.com/ecojust/easy-publish/releases/tag/v0.1.7) 下载对应安装包：
+从 [Release 页面](https://github.com/ecojust/easy-publish/releases/tag/v0.1.8) 下载对应安装包：
 
 | 系统 | 下载 |
 | --- | --- |
-| macOS Apple Silicon（M1–M5） | [ARM DMG](https://github.com/ecojust/easy-publish/releases/download/v0.1.7/Easy-Publish_0.1.7_macos-arm64.dmg) |
-| macOS Intel | [Intel DMG](https://github.com/ecojust/easy-publish/releases/download/v0.1.7/Easy-Publish_0.1.7_macos-x64.dmg) |
-| Windows x64 | [安装程序](https://github.com/ecojust/easy-publish/releases/download/v0.1.7/Easy-Publish_0.1.7_windows-x64-setup.exe) |
+| macOS Apple Silicon（M1–M5） | [ARM DMG](https://github.com/ecojust/easy-publish/releases/download/v0.1.8/Easy-Publish_0.1.8_macos-arm64.dmg) |
+| macOS Intel | [Intel DMG](https://github.com/ecojust/easy-publish/releases/download/v0.1.8/Easy-Publish_0.1.8_macos-x64.dmg) |
+| Windows x64 | [安装程序](https://github.com/ecojust/easy-publish/releases/download/v0.1.8/Easy-Publish_0.1.8_windows-x64-setup.exe) |
 
 升级前完全退出旧版。macOS 打开 DMG，将应用拖入“应用程序”；Windows 运行安装程序。Release 同时提供 `SHA256SUMS.txt`。后续开发构建仍可从成功的 [Actions 运行](https://github.com/ecojust/easy-publish/actions/workflows/build.yml) 下载 artifact 并解压 ZIP，Actions 下载通常需要登录 GitHub。
 
@@ -44,7 +44,7 @@ macOS 请使用 0.1.1 或之后的构建。0.1.0 在部分 Mac 上会因启动�
 
 1. 打开“设置”，查看发布浏览器和应用账号存储状态。应用会先查找已安装的 Chrome / Edge / Chromium；没有可用浏览器时，点击“下载并准备浏览器”。下载需要网络，公众号官方 API 操作本身不依赖浏览器。
 2. 在“账号管理”添加账号并连接，通过“发布时默认选中”开关设置常用账号；公众号在这里选择自己的文章模板。抖音、小红书和视频号优先检查应用已保存的会话，需要重新登录时才打开独立浏览器；公众号填写开发者凭据后检查连接。连接期间可点击“取消连接”，等待浏览器清理后重试。
-3. 文章页上方填写标题、作者、封面等资料，在一个正文输入框中输入纯文本。点击“生成”后，内置 OpenCode 把原文整理为 Markdown；通过右上角“预览”按钮打开弹窗，按账号查看最终平台效果。原文独立保留，修改正文后需要重新整理；已经写好的 Markdown 稿件可直接预览。视频页仍支持导入 MP4、MOV、M4V、WebM，填写标题、描述、话题及封面。
+3. 文章页上方填写标题、作者、封面等资料，在一个正文输入框中输入纯文本。点击“润色生成”后，内置 OpenCode 润色原文并生成 Markdown；通过右上角“预览”按钮打开弹窗，按账号查看最终平台效果。原文独立保留，修改正文后需要重新整理；已经写好的 Markdown 稿件可直接预览。视频页仍支持导入 MP4、MOV、M4V、WebM，填写标题、描述、话题及封面。
 4. 文章和视频自动使用账号管理中已开启且连接就绪的兼容账号，无需在发布页再次勾选。选择“发布内容”或“平台草稿”，填写相应平台的来源或创作声明，检查预览及内容要求后创建任务。
 5. 在“发布任务”查看每个账号的进度与结果。任务保存创建时的内容快照，后续修改本地稿件不会改变已创建的任务。
 
@@ -74,18 +74,11 @@ macOS 请使用 0.1.1 或之后的构建。0.1.0 在部分 Mac 上会因启动�
 
 每个公众号在账号管理中选择自己的模板，同一篇文章可以为不同账号生成不同版式。创建发布任务时冻结模板，之后修改账号设置不会改变已排队任务：
 
-| 模板 | 风格 |
-| --- | --- |
-| 清爽蓝 | 蓝色标题带与清晰留白，适合通用长文 |
-| 墨色杂志 | 衬线标题、纸张底色与细分隔线，适合专栏 |
-| 暖色手记 | 暖色标题与柔和引用块，适合故事和随笔 |
-| 理性科技 | 青绿色层级与深色代码区，适合技术文章 |
-| 森林来信 | 绿色边框与圆角卡片，适合自然和生活方式 |
-| 黑金画报 | 黑金色块与几何边框，适合专题和品牌内容 |
+内置 Wenyan 官方八款模板：默认经典、橙心、彩虹、青金石、思源、玉米、紫色、物理猫。排版使用与 oDesk 中 Wenyan CLI 相同的官方渲染核心，不再用手写样式近似这些主题；原六款模板仍作为兼容选项保留。账号管理展示实际模板缩略图，切换只重新排版，不调用模型。详情见 [文章模板说明](docs/article-templates.md)。
 
-六套版式参考 oDesk 公众号模板方向，分别设计标题、引用、列表、强调、代码块、表格和图注。账号设置中的模板卡片展示真实排版缩略图，切换模板保留原文与整理结果，不再次调用模型。图片标题可用于图注，详见 [文章模板说明](docs/article-templates.md)。
+文章预览独立于发布账号筛选，没有账号也可以查看默认排版；已发布过或关闭自动发布的账号仍可预览。旧 Markdown 仍可直接预览，或复制为新的纯文本润色草稿，保留原稿。
 
-整理文章使用安装包内的 OpenCode 和官方免密钥免费模型入口，需要联网。只有点击“生成”才会把原文发送到该模型；保存、预览及切换模板不会发送。免费服务可能限流或暂时不可用，应用保留原文并提示重试，不自动改用付费模型。整理与发布是独立操作，生成结果应通过右上角“预览”按钮打开弹窗核对。设置页可检查内置整理服务状态，无需登录个人 OpenCode 或提供密钥。
+整理文章使用安装包内的 OpenCode 和官方免密钥免费模型入口，需要联网。只有点击“润色生成”才会把原文发送到该模型；保存、预览及切换模板不会发送。免费服务可能限流或暂时不可用，应用保留原文并提示重试，不自动改用付费模型。整理与发布是独立操作，生成结果应通过右上角“预览”按钮打开弹窗核对。设置页可检查内置整理服务状态，无需登录个人 OpenCode 或提供密钥。
 
 发布前会根据目标编辑器转换 HTML。公众号与大鱼号保留其支持的内联样式；知乎、雪球使用平台原生排版，不能保证保留全部颜色和字体。不支持的表格或代码结构会转换为可读内容。选择目标平台预览可查看对应效果和说明，正文图片仍需先导入本地素材。
 

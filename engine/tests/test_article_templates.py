@@ -7,7 +7,7 @@ from PIL import Image
 import pytest
 from pydantic import ValidationError
 
-from easy_publish.article_templates import ARTICLE_TEMPLATES, article_format_notes, render_article
+from easy_publish.article_templates import LEGACY_ARTICLE_TEMPLATES as ARTICLE_TEMPLATES, article_format_notes, render_article
 from easy_publish.content import ContentInput, image_sources
 from easy_publish.providers import social, wechat
 from easy_publish.providers.base import ProviderContext, PublishPayload

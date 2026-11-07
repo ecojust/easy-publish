@@ -21,6 +21,14 @@
   ];
   const bilibiliCategories = [{ value: "101", label: "测试分区 / 科普" }, { value: "102", label: "测试分区 / 创作" }];
   const articleTemplates = [
+    {id: "wenyan-default", name: "默认经典", description: "Wenyan 官方模板", accent: "#3b82f6"},
+    {id: "wenyan-orangeheart", name: "橙心", description: "Wenyan 官方模板", accent: "#ef8a36"},
+    {id: "wenyan-rainbow", name: "彩虹", description: "Wenyan 官方模板", accent: "#c084fc"},
+    {id: "wenyan-lapis", name: "青金石", description: "Wenyan 官方模板", accent: "#4872b0"},
+    {id: "wenyan-pie", name: "思源", description: "Wenyan 官方模板", accent: "#f09a88"},
+    {id: "wenyan-maize", name: "玉米", description: "Wenyan 官方模板", accent: "#d4ac0d"},
+    {id: "wenyan-purple", name: "紫色", description: "Wenyan 官方模板", accent: "#8b5cf6"},
+    {id: "wenyan-phycat", name: "物理猫", description: "Wenyan 官方模板", accent: "#7e57c2"},
     {"id": "clean", "name": "清爽蓝", "description": "蓝色章节条、清晰列表与留白，适合知识分享", "accent": "#2563eb"},
     {"id": "editorial", "name": "墨色杂志", "description": "米白纸面、衬线标题与双线装饰，适合深度阅读", "accent": "#9a3412"},
     {"id": "journal", "name": "暖色手记", "description": "暖色标题卡、圆角引用与照片边框，适合生活记录", "accent": "#b45309"},
@@ -36,7 +44,7 @@
     accounts: [account("a-wechat", "wechat", "品牌公众号"), account("a-zhihu", "zhihu", "创作笔记"), account("a-dayu", "dayu", "创作工作室"), account("a-douyin", "douyin", "品牌抖音"), account("a-kuaishou", "kuaishou", "品牌快手"), account("a-xhs", "xiaohongshu", "品牌小红书"), account("a-channels", "channels", "品牌视频号", "login_required"), account("a-bilibili", "bilibili", "品牌哔哩哔哩")],
     contents: [draft("c-article", "article", "把创作的时间，还给创作", "## 少一点重复，多一点表达\n\n每一篇好内容，都值得被更多人看见。\n\n当文章写完、视频剪好，接下来的分享应该简单一些。\n\n### 这一次，专注内容本身\n\n- 在一个工作空间整理素材\n- 为不同平台选择合适的账号\n- 清楚了解每个目标的发布进度\n\n**一份创作，更多可能。**"), draft("c-article-2", "article", "从灵感到第一篇文章", "写下你的第一个想法。")],
     batches: [],
-    runtime: { browserReady: true, browserInstalling: false, browserMessage: "测试浏览器已就绪", vaultReady: true, vaultMessage: "测试凭据库已就绪", version: "0.1.7" },
+    runtime: { browserReady: true, browserInstalling: false, browserMessage: "测试浏览器已就绪", vaultReady: true, vaultMessage: "测试凭据库已就绪", version: "0.1.8" },
   };
   const assets = {};
   const calls = [];
@@ -61,7 +69,7 @@
     if (entry.platformId === "bilibili") entry.bilibiliCategories = clone(bilibiliCategories);
   };
   window.__fixture = {
-    state, calls, formatJobs,
+    state, calls, formatJobs, renderedPreviews: {},
     deferFormatting: (value) => { deferFormats = value; },
     failFormatting: (value) => { failFormat = value; },
     finishFormatting: finishFormat,
@@ -113,9 +121,10 @@
         return clone(job);
       }
       if (method === "POST" && path === "/api/preview/article") {
-        // UI protocol fixture only. Production uses the Python article renderer.
+        // UI protocol fixture only, not evidence of real Wenyan rendering.
         const templateId = body.accountId ? state.accounts.find((account) => account.id === body.accountId).wechatTemplateId || "clean" : body.articleTemplateId;
         const template = articleTemplates.find((item) => item.id === templateId);
+        if (window.__fixture.renderedPreviews[templateId]) return { html: window.__fixture.renderedPreviews[templateId], notes: [] };
         const html = await window.__renderMarkdownFixture(body.body);
         const native = ["zhihu", "xueqiu"].includes(body.platformId);
         return {

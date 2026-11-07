@@ -165,7 +165,7 @@ test("account templates persist and preview without changing the original articl
   await page.getByRole("navigation").getByRole("button", { name: "账号管理", exact: true }).click();
   await page.getByRole("button", { name: "设置 品牌公众号 文章模板" }).click();
   const picker = page.getByRole("group", { name: "公众号文章模板", exact: true });
-  await expect(picker.locator(".template-miniature")).toHaveCount(6);
+  await expect(picker.locator(".template-miniature")).toHaveCount(14);
   for (const name of ["清爽蓝", "墨色杂志", "暖色手记", "理性科技", "森林来信", "黑金画报"]) {
     const choice = picker.getByRole("button", { name: new RegExp(name) });
     await choice.click(); await expect(choice).toHaveAttribute("aria-pressed", "true");
@@ -200,7 +200,7 @@ test("account templates persist and preview without changing the original articl
   expect(result.state.accounts.find((item: any) => item.id === "a-wechat").wechatTemplateId).toBe("artdeco");
   expect(result.state.contents.find((item: any) => item.title === "文章模板工作流").body).toContain("让内容更易读");
   expect(result.calls.filter((call: any) => /\/format$/.test(call.path))).toHaveLength(0);
-  expect(result.calls.filter((call: any) => call.path === "/api/preview/article" && call.body.body.startsWith("# 灵感的形状"))).toHaveLength(6);
+  expect(result.calls.filter((call: any) => call.path === "/api/preview/article" && call.body.body.startsWith("# 灵感的形状"))).toHaveLength(14);
 });
 
 test("engine preview failures can retry and preview markup remains constrained", async ({ page }) => {

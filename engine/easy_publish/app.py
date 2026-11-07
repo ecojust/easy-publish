@@ -12,7 +12,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, model_validator
 
-from easy_publish.content import ContentInput, import_asset, preview_asset, render_article
+from easy_publish.content import ContentInput, import_asset, preview_asset
 from easy_publish.article_templates import ArticleTemplateId
 from easy_publish.catalog import BY_ID
 from easy_publish.service import Problem, Service
@@ -130,7 +130,7 @@ def create_app(data_dir: Path, token: str, runtime=None, *, formatter=None, mcp_
 
     @app.post("/api/preview/article")
     async def preview_article(value: ArticlePreviewInput):
-        return service.preview_article(value.body, value.articleTemplateId, value.platformId, value.accountId)
+        return await service.preview_article(value.body, value.articleTemplateId, value.platformId, value.accountId)
 
     @app.post("/api/mcp/call")
     async def mcp_call(value: McpCallInput):

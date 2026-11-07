@@ -1,8 +1,23 @@
 # 文章模板与公众号排版
 
-在“账号管理”中为每个微信公众号选择模板，默认清爽蓝；每次发布冻结各账号当时的选择。文章页上方输入原文及标题、作者、封面等信息，通过右上角“预览”弹窗查看各目标的最终排版。切换账号模板只重新排版，不再次调用模型。旧Markdown稿件和旧批次继续使用兼容规则。
+在“账号管理”中为每个微信公众号选择模板，默认 Wenyan「默认经典」；每次发布冻结各账号当时的选择。文章页上方输入原文及标题、作者、封面等信息，通过右上角“预览”弹窗查看各目标的最终排版。切换账号模板只重新排版，不再次调用模型。旧Markdown稿件和旧批次继续使用兼容规则。
 
-新文章通过内置OpenCode免费模型整理为Markdown，原文单独保留。只有点击“生成”才发送原文；内容更新后需重新整理，通过右上角“预览”弹窗核对各账号效果后再发布。模板不会自动添加章节编号、署名或推广文字。
+新文章通过内置 OpenCode 免费模型润色为 Markdown，原文单独保留。只有点击“润色生成”才发送原文；内容更新后需重新整理，通过右上角“预览”弹窗核对各账号效果后再发布。Wenyan 按官方规则生成装饰与链接参考项，不添加署名或推广文字。
+
+Wenyan 模板使用 `@wenyan-md/core@3.0.12`，与 Wenyan CLI 2.0.12 使用同一官方排版核心。它负责主题样式、标题装饰、代码高亮和微信兼容处理；不是根据模板名称重新绘制的近似样式。原文先经 OpenCode 改善表达、衔接和结构，再由本地 Wenyan 渲染。保存、预览和切换模板均不调用模型。
+
+| Wenyan 官方模板 | ID |
+| --- | --- |
+| 默认经典 | `wenyan-default` |
+| 橙心 | `wenyan-orangeheart` |
+| 彩虹 | `wenyan-rainbow` |
+| 青金石 | `wenyan-lapis` |
+| 思源 | `wenyan-pie` |
+| 玉米 | `wenyan-maize` |
+| 紫色 | `wenyan-purple` |
+| 物理猫 | `wenyan-phycat` |
+
+升级后，仍使用旧默认清爽蓝的账号会改为 Wenyan 默认模板；其他已选模板保留。旧发布批次不会被迁移，重试仍使用创建时的模板。以下六款兼容模板继续可选，其原渲染方式保持不变：
 
 | 模板 | ID | 版式方向 |
 | --- | --- | --- |
@@ -21,7 +36,7 @@
 ![替代说明](easy-asset://素材ID "雨后山谷，摄于清晨")
 ```
 
-只有显式填写的图片标题作为图注，不把文件名或替代文字自动复制为图注。封面仍是独立字段。
+兼容模板仅使用显式图片标题作为图注；Wenyan 模板采用官方主题的图片说明规则。封面仍是独立字段。
 
 模板卡片使用同一个服务端渲染器生成固定示例的缩略图；工作台预览当前稿件，微信公众号提交使用同一渲染规则，再将本地图片地址替换为微信素材地址。缩略图示例不会写入稿件。微信公众号可能调整个别字体、间距和链接显示，实际效果以平台预览为准。
 
@@ -29,7 +44,7 @@
 
 ## oDesk 参考来源
 
-参考 [ecojust/oDesk 固定提交 d062c05](https://github.com/ecojust/oDesk/tree/d062c05b3442f45205ff83cc28497d435fccce99) 的 [WechatPublisherTemplate.js](https://github.com/ecojust/oDesk/blob/d062c05b3442f45205ff83cc28497d435fccce99/src/views/skillapps/WechatPublisherTemplate.js)、[WechatPublisher.vue](https://github.com/ecojust/oDesk/blob/d062c05b3442f45205ff83cc28497d435fccce99/src/views/skillapps/WechatPublisher.vue)，及 [wechat-publisher.zip](https://github.com/ecojust/oDesk/blob/d062c05b3442f45205ff83cc28497d435fccce99/src-tauri/addin/skills/wechat-publisher.zip) 中的以下 CSS。上游用 Wenyan CLI 和主题 CSS 排版；本项目独立实现受控的内联 HTML／CSS，无需额外安装该 CLI。
+参考 [ecojust/oDesk 固定提交 d062c05](https://github.com/ecojust/oDesk/tree/d062c05b3442f45205ff83cc28497d435fccce99) 的 [WechatPublisherTemplate.js](https://github.com/ecojust/oDesk/blob/d062c05b3442f45205ff83cc28497d435fccce99/src/views/skillapps/WechatPublisherTemplate.js)、[WechatPublisher.vue](https://github.com/ecojust/oDesk/blob/d062c05b3442f45205ff83cc28497d435fccce99/src/views/skillapps/WechatPublisher.vue)，及 [wechat-publisher.zip](https://github.com/ecojust/oDesk/blob/d062c05b3442f45205ff83cc28497d435fccce99/src-tauri/addin/skills/wechat-publisher.zip) 中的以下 CSS。上游用 Wenyan CLI 和主题 CSS 排版；从 0.1.8 起本项目内置同一官方核心的八款主题，无需用户安装 Node.js、npm 或 CLI。此前六款近似主题仅作为兼容选项保留。
 
 | ZIP 内路径 | SHA-256 |
 | --- | --- |
@@ -39,4 +54,6 @@
 | `scripts/artdeco.css` | `ef5f6f2a6aa99fe6bdaf352768b1d784be1df6193415dce922c4be61650e517a` |
 | `scripts/blueprint.css` | `10eb491cf92745f667b971e0f942a3a09e9596fc6564fb1001e619b862c4fb5c` |
 
-保留版式方向，以直接内联的颜色、边框、间距与真实 HTML 元素实现；不依赖 CSS 变量、伪元素、外部字体、渐变背景或动态脚本。不加载上游的账号缓存或执行上游技能。许可见 [第三方来源与许可](../THIRD_PARTY_NOTICES.md)。
+旧六款保留原来的独立内联样式。新八款由 Wenyan 本地生成内联 HTML，保留官方主题装饰；禁用网络资源和输入的脚本／样式。不加载上游账号缓存或执行上游技能。许可见 [第三方来源与许可](../THIRD_PARTY_NOTICES.md)。
+
+预览与本次发布账号选择独立：关闭默认发布开关或已发布过的文章仍可查看已连接账号的效果；没有文章账号时提供 Wenyan 默认预览。旧 Markdown/MCP 稿件可以直接预览，也可以显式“复制为润色草稿”，保留原稿后再润色。
