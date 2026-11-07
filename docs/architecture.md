@@ -27,15 +27,11 @@ API 成功直接返回 JSON，失败为 `{"error":"公开且已脱敏的错误",
 
 | 方法／路径 | 参数／响应 |
 | --- | --- |
-| GET /api/state | `{platforms,accounts,contents,batches,runtime,articleTemplates,formatting}`，见 `src/shared/types.ts` |
+| GET /api/state | `{platforms,accounts,contents,batches,runtime,articleTemplates}`，见 `src/shared/types.ts` |
 | POST /api/preview/article | `{body,articleTemplateId,platformId?,accountId?}`；返回安全 HTML 及平台格式说明；accountId仅允许公众号并按账号模板生成，不保存或发布 |
 | POST /api/mcp/call | `{name,arguments}`；仅专用 MCP token 和实例编号可用，返回 MCP CallToolResult |
 | POST /api/contents | ContentInput；返回 Content |
 | PUT /api/contents/:id | ContentInput；返回 Content |
-| POST /api/contents/:id/format | `{revision,requestId}`；异步整理纯文本，返回 FormatJob，不发布 |
-| GET /api/format-jobs/:id | 查询整理状态；成功时含更新的 Content |
-| POST /api/format-jobs/:id/cancel | 等待对应整理任务停止，返回最终任务状态 |
-| POST /api/formatting/check | 检查内置 OpenCode 及免费模型，返回公开状态，不发送文章 |
 | DELETE /api/contents/:id | 删除本地稿件；返回 `{ok:true}` |
 | POST /api/assets/import | `{path,kind:video\|image\|article}`；返回 Asset，文章另含 `text` |
 | GET /api/assets/:id | 返回 Asset 公开元数据，不返回本地路径 |
@@ -61,13 +57,13 @@ SQLite 保存稿件、账号公开元数据、批次及各目标状态。`Conten
 
 `ContentInput.articleTemplateId` 包含八款 wenyan-* 官方主题及 clean／editorial／journal／tech／forest／artdeco 六款兼容主题，旧 API 稿件仍默认 clean。新公众号任务以账号的wechatTemplateId为准，创建批次时在accountTemplateIds映射中冻结；之后修改账号模板不会改变队列内任务。Markdown 保持原稿，在生成每个目标的 payload 时按模板及平台转换 HTML；模板缩略图、预览与实际提交使用同一服务端渲染器；API 与 MCP 复用引擎的 ArticleTemplateId 类型。官方及兼容模板来源、图注和平台兼容说明见 [文章模板](article-templates.md)。
 
-新稿件的inputFormat为plain，sourceText保存原文、body保存整理后的Markdown；旧API缺省markdown，不强迫其他agent已写好的Markdown再次调用模型。原文和图片顺序的指纹由引擎计算，客户端不能提交；formatReady为派生公开状态。整理任务有revision及requestId校验，结果写入前再次核对版本，取消／失败／过期结果不覆盖原文。保存、预览、切换账号或模板均不触发模型调用。文章右上角“预览”打开弹窗，按所有已连接文章账号查看模板及平台效果；没有账号时使用 Wenyan 默认主题，预览不改变本次发布目标；关闭预览不保存或丢弃编辑。
+文章 `inputFormat` 固定为 `markdown`，`body` 直接保存用户编辑内容。没有模型调用、生成任务或免费额度状态。文章右上角“预览”打开弹窗，按所有已连接文章账号查看模板及平台效果；没有账号时使用 Wenyan 默认主题，预览不改变本次发布目标；关闭预览保留未保存编辑。官方主题通过内置 Wenyan CLI 的本地 render 路径生成，预览与发布共用同一入口。
 
-原文整理另启动固定版本的 `easy-publish-opencode`。该进程使用应用独立 HOME／XDG／临时会话目录、仅绑定 loopback 的随机端口和随机 Basic 认证，不继承个人模型凭据或 OpenCode 配置。仅核验零费用模型后发送纯文本，不提供工具、MCP、技能或插件；具体调用与打包边界见 [桌面说明](desktop.md)。设置页检查不发送文章，免费目录可用不代表下一次请求一定成功。
+SQLite schema 7 一次性迁移旧纯文本稿件：原文和图片指纹仍匹配的生成结果保留为 Markdown，否则将最新原文按字面文本转入 Markdown 并恢复已导入图片的占位位置。若转义会超过 50 万字符限制，则完整保留原文作为可编辑 Markdown，不截断；图片标记只在全部替换后仍符合上限时转换。精确旧原文、旧结果及来源信息归档，公开 `sourceText` 仅供“查看旧版原文”；客户端保存不能覆盖此归档。旧 Markdown 稿件和已冻结发布批次保持原数据。
 
 `ContentInput.platformOptions` 按平台 ID 保存声明等表单值；平台通过 `Platform.fields` 声明必填项、选项及提示，前端与 preflight 都校验。适配器收到当前目标的平面 `PublishPayload.options`。预检素材读取和实际 payload 生成共用 `target_projection.py`，在副本中移除目标不使用的字段和选项：抖音不消费自定义封面，B 站原创不消费转载来源，大鱼号非转载不消费来源链接。视频忽略文章正文和正文图片；文章忽略视频素材。原稿及批次快照保留完整输入，使用到的素材、必填项及平台长度限制继续校验。
 
-哔哩哔哩的 `copyright`、`tid`、`source` 分别表示原创／转载、投稿分区和转载来源。登录／检查连接读取账号可用分区，worker 仅返回经允许列表过滤的公开分类元数据。`Account.bilibiliCategories` 保存分区 ID 与显示名称；`PlatformField.dynamicChoices` 指向此公开选项。多个账号的界面选择使用分区交集，预检逐账号检查，投稿前再次向平台核实当前可用分区。会话、账号身份和 cookie 仍只保存在加密凭据库。
+哔哩哔哩的 `copyright`、`tid`、`source` 分别表示原创／转载、投稿分区和转载来源。登录／检查连接读取账号可用分区，worker 仅返回经允许列表过滤的公开分类元数据。`Account.bilibiliCategories` 保存分区 ID 与显示名称；`PlatformField.dynamicChoices` 指向此公开选项。各账号独立选择分区，预检逐账号检查，投稿前再次向平台核实当前可用分区。会话、账号身份和 cookie 仍只保存在加密凭据库。
 
 凭据／浏览器 storage state 通过引擎凭据库保存；密钥仅保存在应用数据目录 `vault-local-v1/master.key`，不访问系统凭据服务；macOS／Linux 为目录 0700、文件 0600，Windows 继承当前用户应用目录权限。密钥与密文放在一起，不能抵御可读取完整应用目录的进程。开发测试可使用显式测试密钥。旧 `vault/` 文件保持不变，不做需要系统钥匙串的自动迁移；旧账号提示重新连接。浏览器会话在独立临时目录解密给单个 worker，结束后清理，避免账号互用。任何上游缓存或参考仓库中的凭据不得复制。
 

@@ -1,6 +1,6 @@
 [package]
 name = "easy-publish-desktop"
-version = "0.1.8"
+version = "0.1.9"
 description = "Local article and video publishing workspace"
 authors = ["ecojust"]
 edition = "2021"

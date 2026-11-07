@@ -31,10 +31,6 @@ pub fn allowed_route(method: &str, path: &str) -> bool {
         ("POST", ["", "api", "contents" | "accounts" | "preflight" | "batches"]) => true,
         ("POST", ["", "api", "assets", "import"]) => true,
         ("POST", ["", "api", "preview", "article"]) => true,
-        ("POST", ["", "api", "formatting", "check"]) => true,
-        ("POST", ["", "api", "contents", id, "format"]) => identifier(id),
-        ("GET", ["", "api", "format-jobs", id]) => identifier(id),
-        ("POST", ["", "api", "format-jobs", id, "cancel"]) => identifier(id),
         ("POST", ["", "api", "runtime", "browser", "install"]) => true,
         ("PUT" | "DELETE", ["", "api", "contents", id]) => identifier(id),
         ("DELETE", ["", "api", "accounts", id]) => identifier(id),
@@ -105,16 +101,16 @@ mod tests {
             ("POST", "/api/accounts/abc/cancel"),
             ("PUT", "/api/accounts/abc/preferences"),
             ("POST", "/api/preview/article"),
-            ("POST", "/api/contents/abc/format"),
-            ("GET", "/api/format-jobs/abc"),
-            ("POST", "/api/format-jobs/abc/cancel"),
-            ("POST", "/api/formatting/check"),
             ("POST", "/api/tasks/id_1/retry"),
         ] {
             assert!(allowed_route(method, path));
         }
         for (method, path) in [
             ("GET", "http://example.com/api/state"),
+            ("POST", "/api/contents/abc/format"),
+            ("GET", "/api/format-jobs/abc"),
+            ("POST", "/api/format-jobs/abc/cancel"),
+            ("POST", "/api/formatting/check"),
             ("GET", "/api/contents/abc/format"),
             ("POST", "/api/contents/%2e%2e/format"),
             ("POST", "/api/format-jobs/abc"),

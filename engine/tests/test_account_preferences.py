@@ -46,7 +46,7 @@ def test_version_two_database_defaults_existing_accounts_without_changing_them(t
         assert account["status"] == "ready"
         assert account["message"] == "Preserved connection"
         assert account["updatedAt"] == "before"
-        assert store.one("PRAGMA user_version")["user_version"] == 6
+        assert store.one("PRAGMA user_version")["user_version"] == 7
         assert store.all("SELECT * FROM account_preferences") == []
     finally:
         store.close()

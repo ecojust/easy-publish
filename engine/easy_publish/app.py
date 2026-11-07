@@ -63,21 +63,16 @@ class ArticlePreviewInput(Input):
     accountId: str | None = Field(default=None, min_length=1, max_length=128)
 
 
-class ArticleFormatInput(Input):
-    revision: int = Field(strict=True, ge=1)
-    requestId: UUID
-
-
 class McpCallInput(Input):
     name: str = Field(min_length=1, max_length=80)
     arguments: dict = Field(default_factory=dict)
 
 
-def create_app(data_dir: Path, token: str, runtime=None, *, formatter=None, mcp_token: str | None = None, instance_id: str | None = None):
+def create_app(data_dir: Path, token: str, runtime=None, *, mcp_token: str | None = None, instance_id: str | None = None):
     if runtime is None:
         from easy_publish.runtime import Runtime
         runtime = Runtime(data_dir)
-    service = Service(data_dir, runtime, formatter=formatter)
+    service = Service(data_dir, runtime)
 
     @asynccontextmanager
     async def lifespan(app):
@@ -151,22 +146,6 @@ def create_app(data_dir: Path, token: str, runtime=None, *, formatter=None, mcp_
         service.content_row(identifier)
         service.store.execute("DELETE FROM contents WHERE id=?", (identifier,))
         return {"ok": True}
-
-    @app.post("/api/contents/{identifier}/format")
-    async def format_article(identifier: str, value: ArticleFormatInput):
-        return service.start_article_format(identifier, value.revision, str(value.requestId))
-
-    @app.get("/api/format-jobs/{identifier}")
-    async def format_job(identifier: str):
-        return service.format_job(identifier)
-
-    @app.post("/api/format-jobs/{identifier}/cancel")
-    async def cancel_format_job(identifier: str):
-        return await service.cancel_article_format(identifier)
-
-    @app.post("/api/formatting/check")
-    async def check_formatting():
-        return await service.check_formatting()
 
     @app.post("/api/assets/import")
     async def add_asset(value: AssetInput):

@@ -30,6 +30,8 @@ def check_bundled_driver(binary: Path, directory: Path) -> None:
             modules = archive.open_embedded_archive(name).toc
             if any(module == "keyring" or module.startswith("keyring.") for module in modules):
                 raise RuntimeError("System keyring must not be bundled")
+            if "easy_publish.opencode_runtime" in modules:
+                raise RuntimeError("Removed model-generation runtime must not be bundled")
     for name, entry in archive.toc.items():
         normalized = name.replace("\\", "/")
         if not normalized.startswith("patchright/driver/"):
@@ -77,7 +79,7 @@ def main() -> None:
     if not entry_module.is_file():
         parser.error("The engine entry point is missing.")
     wenyan = ROOT / "runtime/wenyan/dist"
-    if not (wenyan / "render.cjs").is_file():
+    if not all((wenyan / name).is_file() for name in ("render.cjs", "wenyan-cli.mjs", "THIRD_PARTY.json")):
         parser.error("The bundled Wenyan renderer is missing. Run npm run prepare:wenyan first.")
     suffix = ".exe" if os.name == "nt" else ""
     destination = ROOT / "src-tauri/binaries" / f"easy-publish-engine-{target}{suffix}"

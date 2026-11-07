@@ -1,10 +1,8 @@
 # 文章模板与公众号排版
 
-在“账号管理”中为每个微信公众号选择模板，默认 Wenyan「默认经典」；每次发布冻结各账号当时的选择。文章页上方输入原文及标题、作者、封面等信息，通过右上角“预览”弹窗查看各目标的最终排版。切换账号模板只重新排版，不再次调用模型。旧Markdown稿件和旧批次继续使用兼容规则。
+在“账号管理”中为每个微信公众号选择模板，默认 Wenyan「默认经典」；每次发布冻结各账号当时的选择。文章页上方填写标题、作者、封面等信息，正文直接输入 Markdown，通过右上角“预览”弹窗查看各目标的最终排版。
 
-新文章通过内置 OpenCode 免费模型润色为 Markdown，原文单独保留。只有点击“润色生成”才发送原文；内容更新后需重新整理，通过右上角“预览”弹窗核对各账号效果后再发布。Wenyan 按官方规则生成装饰与链接参考项，不添加署名或推广文字。
-
-Wenyan 模板使用 `@wenyan-md/core@3.0.12`，与 Wenyan CLI 2.0.12 使用同一官方排版核心。它负责主题样式、标题装饰、代码高亮和微信兼容处理；不是根据模板名称重新绘制的近似样式。原文先经 OpenCode 改善表达、衔接和结构，再由本地 Wenyan 渲染。保存、预览和切换模板均不调用模型。
+内置 Wenyan CLI 在本地将 Markdown 转为带主题样式的 HTML，处理标题装饰、代码高亮和微信兼容排版。无需模型服务、API 密钥或全局 CLI；编辑、预览和切换模板都不发送文章到模型。Wenyan 按官方规则生成装饰与链接参考项，不添加署名或推广文字。
 
 | Wenyan 官方模板 | ID |
 | --- | --- |
@@ -44,7 +42,7 @@ Wenyan 模板使用 `@wenyan-md/core@3.0.12`，与 Wenyan CLI 2.0.12 使用同�
 
 ## oDesk 参考来源
 
-参考 [ecojust/oDesk 固定提交 d062c05](https://github.com/ecojust/oDesk/tree/d062c05b3442f45205ff83cc28497d435fccce99) 的 [WechatPublisherTemplate.js](https://github.com/ecojust/oDesk/blob/d062c05b3442f45205ff83cc28497d435fccce99/src/views/skillapps/WechatPublisherTemplate.js)、[WechatPublisher.vue](https://github.com/ecojust/oDesk/blob/d062c05b3442f45205ff83cc28497d435fccce99/src/views/skillapps/WechatPublisher.vue)，及 [wechat-publisher.zip](https://github.com/ecojust/oDesk/blob/d062c05b3442f45205ff83cc28497d435fccce99/src-tauri/addin/skills/wechat-publisher.zip) 中的以下 CSS。上游用 Wenyan CLI 和主题 CSS 排版；从 0.1.8 起本项目内置同一官方核心的八款主题，无需用户安装 Node.js、npm 或 CLI。此前六款近似主题仅作为兼容选项保留。
+参考 [ecojust/oDesk 固定提交 d062c05](https://github.com/ecojust/oDesk/tree/d062c05b3442f45205ff83cc28497d435fccce99) 的 [WechatPublisherTemplate.js](https://github.com/ecojust/oDesk/blob/d062c05b3442f45205ff83cc28497d435fccce99/src/views/skillapps/WechatPublisherTemplate.js)、[WechatPublisher.vue](https://github.com/ecojust/oDesk/blob/d062c05b3442f45205ff83cc28497d435fccce99/src/views/skillapps/WechatPublisher.vue)，及 [wechat-publisher.zip](https://github.com/ecojust/oDesk/blob/d062c05b3442f45205ff83cc28497d435fccce99/src-tauri/addin/skills/wechat-publisher.zip) 中的以下 CSS。上游用 Wenyan CLI 和主题 CSS 排版；0.1.8 接入同一官方核心的八款主题；0.1.9 内置官方 CLI 的 render 路径，无需用户安装 Node.js、npm 或 CLI。此前六款近似主题仅作为兼容选项保留。
 
 | ZIP 内路径 | SHA-256 |
 | --- | --- |
@@ -56,4 +54,4 @@ Wenyan 模板使用 `@wenyan-md/core@3.0.12`，与 Wenyan CLI 2.0.12 使用同�
 
 旧六款保留原来的独立内联样式。新八款由 Wenyan 本地生成内联 HTML，保留官方主题装饰；禁用网络资源和输入的脚本／样式。不加载上游账号缓存或执行上游技能。许可见 [第三方来源与许可](../THIRD_PARTY_NOTICES.md)。
 
-预览与本次发布账号选择独立：关闭默认发布开关或已发布过的文章仍可查看已连接账号的效果；没有文章账号时提供 Wenyan 默认预览。旧 Markdown/MCP 稿件可以直接预览，也可以显式“复制为润色草稿”，保留原稿后再润色。
+预览与本次发布账号选择独立：关闭默认发布开关或已发布过的文章仍可查看已连接账号的效果；没有文章账号时提供 Wenyan 默认预览。Markdown/MCP 稿件直接预览。升级时，旧版有效生成结果保留为 Markdown；未生成或已失效的稿件按最新原文迁入，旧原文可展开查看。极长原文若转义后超出长度限制，会完整保留为可编辑 Markdown；可核对原有 Markdown 符号及图片位置。已创建的发布任务不受迁移影响。

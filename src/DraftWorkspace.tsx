@@ -4,7 +4,7 @@ import { bridge, errorMessage, request } from "./api";
 import { AssetImage, useAssetMetadata } from "./MarkdownPreview";
 import ArticleWorkspace from "./ArticleWorkspace";
 import { byteLabel, dateLabel, InlineError, Modal, PlatformMark, Spinner } from "./ui";
-import type { Account, ArticleTemplate, Asset, Batch, Content, ContentInput, ContentKind, FormattingState, Platform, Preflight, PublishMode } from "./shared/types";
+import type { Account, ArticleTemplate, Asset, Batch, Content, ContentInput, ContentKind, Platform, Preflight, PublishMode } from "./shared/types";
 
 const newContent = (kind: ContentKind): ContentInput => ({ kind, videoOptionsSource: "account", inputFormat: "markdown", sourceText: "", title: "", body: "", description: "", tags: [], author: "", videoAssetId: null, coverAssetId: null, imageAssetIds: [], platformOptions: {}, articleTemplateId: "clean" });
 const asInput = (content: Content): ContentInput => ({ kind: content.kind, videoOptionsSource: "account", inputFormat: content.inputFormat || "markdown", sourceText: content.sourceText || "", title: content.title, body: content.body, description: content.description, tags: content.tags, author: content.author, videoAssetId: content.videoAssetId, coverAssetId: content.coverAssetId, imageAssetIds: content.imageAssetIds, platformOptions: content.platformOptions || {}, articleTemplateId: content.articleTemplateId || "clean" });
@@ -17,8 +17,6 @@ interface Props {
   platforms: Platform[];
   accounts: Account[];
   articleTemplates: ArticleTemplate[];
-  formatting: FormattingState;
-  onSettings: () => void;
   onRefresh: () => Promise<void>;
   onAccounts: () => void;
   onTasks: () => void;

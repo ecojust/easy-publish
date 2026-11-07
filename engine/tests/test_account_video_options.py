@@ -62,7 +62,7 @@ def test_schema_five_upgrade_preserves_preferences_and_frozen_batches(tmp_path):
             assert account['videoOptions'] is None and account['defaultSelected'] is False
             assert account['status'] == 'ready' and account['message'] == 'Preserved connection'
             assert store.one("SELECT * FROM account_preferences WHERE account_id='bili'")['wechat_template_id'] == 'forest'
-            assert store.one('PRAGMA user_version')['user_version'] == 6
+            assert store.one('PRAGMA user_version')['user_version'] == 7
             assert json.loads(store.one("SELECT snapshot FROM batches WHERE id='batch'")['snapshot']) == original
         finally:
             store.close()
