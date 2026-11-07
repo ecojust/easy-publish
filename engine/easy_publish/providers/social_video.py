@@ -762,6 +762,66 @@ async def _wait_enabled(button, page, timeout: float = UPLOAD_SECONDS) -> None:
             await asyncio.sleep(1)
 
 
+async def _xhs_wait_submit_button(page, ctx: ProviderContext, *, seconds: float = 60):
+    """Resolve only the current composer action, never an unrelated publish button.
+
+    Patchright supports the current component's closed shadow root. Scope its
+    normal role locator to that component instead of selecting the first global
+    button. The legacy editor is supported only if no current component has
+    appeared during this wait; a remount cannot redirect the intended action.
+    """
+    ctx.progress("小红书发布信息已填写，正在确认发布按钮可用")
+    saw_component = False
+    try:
+        async with asyncio.timeout(seconds):
+            while True:
+                if page.is_closed():
+                    raise VideoStageError("小红书提交前浏览器已关闭；尚未点击发布，请先核对平台草稿")
+                parsed = urlsplit(page.url)
+                if (parsed.scheme != "https" or parsed.hostname != SITES["xiaohongshu"].host
+                        or parsed.port not in {None, 443} or parsed.path.rstrip("/") != "/publish/publish"):
+                    raise VideoStageError("小红书提交前已离开本次发布页面；尚未点击发布，请先核对平台草稿")
+                try:
+                    components = page.locator("xhs-publish-btn")
+                    if await components.count():
+                        saw_component = True
+                        current = components.filter(visible=True)
+                        count = await current.count()
+                        if count > 1:
+                            raise VideoStageError("小红书存在多个可见发布区域，无法确认本次按钮；尚未点击发布，请先核对平台页面")
+                        if not count:
+                            await asyncio.sleep(1)
+                            continue
+                        buttons = current.get_by_role("button", name="发布", exact=True).filter(visible=True)
+                    elif not saw_component:
+                        buttons = page.get_by_role("button", name="发布", exact=True).filter(visible=True)
+                    else:
+                        # Do not switch to an unrelated legacy-looking button
+                        # while the current component is being replaced.
+                        await asyncio.sleep(1)
+                        continue
+                    count = await buttons.count()
+                    if count > 1:
+                        raise VideoStageError("小红书存在多个可见发布按钮，无法确认本次提交；尚未点击发布，请先核对平台页面")
+                    if count == 1:
+                        button = buttons.first
+                        if (await button.is_enabled()
+                                and await button.get_attribute("aria-busy") != "true"
+                                and "loading" not in (await button.get_attribute("class") or "").split()):
+                            handle = await button.element_handle()
+                            if handle is not None:
+                                return handle
+                except VideoStageError:
+                    raise
+                except Exception:
+                    # Vue may replace the component during a read. Reacquire
+                    # within this deadline; the actual click is never retried.
+                    pass
+                await asyncio.sleep(1)
+    except TimeoutError:
+        raise VideoStageError("小红书发布按钮在 60 秒内未能确认可用；尚未点击发布，请检查页面必填项、验证或弹窗，并先核对平台草稿") from None
+
+
 async def _fill_editor(page, editor, text: str) -> None:
     await editor.click()
     await page.keyboard.press("ControlOrMeta+A")
@@ -845,23 +905,29 @@ async def _prepare(page, platform: str, payload: PublishPayload, ctx: ProviderCo
         await _xhs_wait_upload(page, payload.video_path.name, ctx)
         stage = "标题"
         try:
+            ctx.progress("正在填写小红书标题")
             title = page.locator('input[placeholder*="填写标题"]').first
             await title.wait_for(state="visible", timeout=45_000)
             await title.fill(payload.title)
             stage = "正文"
+            ctx.progress("正在填写小红书正文")
             editor = page.locator('p[data-placeholder*="输入正文描述"]').first
             await _fill_editor(page, editor, payload.description)
             stage = "话题"
+            if payload.tags:
+                ctx.progress("正在设置小红书话题")
             for tag in payload.tags:
                 await page.keyboard.insert_text("#" + tag)
                 item = page.locator("#creator-editor-topic-container .item").filter(has_text=tag).first
                 await item.click(timeout=10_000)
             if payload.cover_path:
                 stage = "封面"
+                ctx.progress("正在设置小红书封面")
                 await _xhs_cover(page, payload.cover_path)
         except Exception:
             raise VideoStageError(f"小红书视频已上传，但填写{stage}未完成；尚未点击发布，请先核对平台草稿及页面提示") from None
-        return page.get_by_role("button", name="发布", exact=True).first
+        # Resolve the current action after all metadata/cover work has settled.
+        return None
     frame = await _channels_wait_upload(page, payload, ctx)
     document = None
     if payload.cover_path:
@@ -910,7 +976,9 @@ async def _confirm_receipt(page, platform: str, payload: PublishPayload) -> Prov
 
 
 async def _submit_once(page, button, platform: str, payload: PublishPayload, ctx: ProviderContext) -> ProviderResult:
-    if platform == "channels":
+    if platform == "xiaohongshu":
+        button = await _xhs_wait_submit_button(page, ctx)
+    elif platform == "channels":
         prepared = button
         try:
             async with asyncio.timeout(60):
@@ -945,6 +1013,10 @@ async def _submit_once(page, button, platform: str, payload: PublishPayload, ctx
         return await _confirm_receipt(page, platform, payload)
     except Exception:
         return ProviderResult("unknown", "已尝试提交，尚未获得明确回执；请先在平台核对原作品，勿直接重复发布", url=SITES[platform].url)
+    finally:
+        if platform == "xiaohongshu":
+            with suppress(Exception):
+                await button.dispose()
 
 
 async def publish(payload: PublishPayload, ctx: ProviderContext) -> ProviderResult:

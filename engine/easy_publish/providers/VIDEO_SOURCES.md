@@ -54,6 +54,18 @@
 
 仅据公开 DOM 状态实现等待逻辑，未复制页面业务代码。回归包含隔离状态测试和可选 Chromium 全量拦截路由测试：慢上传时标题／发布按钮已经显示，上传 100% 和转码阶段仍保持窗口及等待，预览就绪后才填写并提交一次。未使用真实账号上传或发布；用户设备上的具体失败堆栈尚未取得，实际平台效果仍需新版验证。
 
+## 小红书最终提交按钮
+
+2026-11-07 检查上述发布页资源及其引用的
+[`project-publish-components.ffe7177e.js`](https://fe-static.xhscdn.com/formula-static/ugc/public/resource/js/project-publish-components.ffe7177e.js)
+（SHA-256：`52001984a23dde99d0c5a64503d869f825bd9aac957230c6c2daeb0f603f49e1`）：当前 VideoLayout 使用 `xhs-publish-btn`，内部包含“暂存离开”和“发布”两个动作，提交控件会设置 disabled、aria-disabled、aria-busy 及 loading 状态。
+
+组件采用 closed shadow root，但实际固定 Patchright 1.58.2 的普通角色定位和原生点击已支持此结构；隔离浏览器的主世界脚本回归已确认。因此 closed root 本身不作为故障原因，不改写 attachShadow，不调用组件内部事件或绕过平台提交逻辑。
+
+旧实现取全页第一个同名“发布”按钮，并复用上传阶段的 20 分钟等待；隔离页面可复现前置的无关 disabled 按钮挡住当前组件内可用按钮。现在优先限定唯一可见的 `xhs-publish-btn`，仅组件完全不存在时兼容旧页面的唯一可见“发布”按钮，拒绝重复区域／按钮和不匹配的页面。等待缩短为独立 60 秒，标题、正文、话题、封面及按钮就绪分别报告阶段。准备期间组件重建只重新读取控件，实际点击仍最多一次；缺失成功回执仍为 unknown，不自动重试。
+
+这修复了可复现的按钮定位和等待问题；用户仅报告标题、正文已填写且按钮可点，尚未提供实际任务提示或页面 DOM，因此不将该回归场景称为已证明的用户设备根因。测试完全拦截外部请求，没有真实账号投稿。
+
 ## 视频号上传与编辑器刷新修复依据
 
 固定 SAU 提交 `3847fff01f5434a8a32829833163cd6723cabc59` 的 `uploader/tencent_uploader/main.py`：581–622 行说明须从首页“发表视频”进入，实际编辑器在 `/micro/content/post/create` iframe；810–879 行在基本描述填写后，以 iframe 内可见且未 disabled、无 `weui-desktop-btn_disabled` 类的 `div.form-btns`“发表”按钮作为就绪信号；`div.status-msg.error` 用于上传失败识别。1098–1132 行注明上传完成后表单会刷新，短标题、封面及合集在上传等待后设置。没有证据证明 `.media-status-content` 在成功态仍存在，因此它只用于读取可见进度／错误相关文本，不能成为成功的硬性条件。

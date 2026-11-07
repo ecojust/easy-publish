@@ -4,7 +4,7 @@
 
 面向 **macOS 13.5+（Apple Silicon / Intel）和 Windows 10+ x64**。桌面使用 Tauri 2 和系统 WebView，发布引擎随安装包提供，普通用户无需安装 Python、Node.js 或开发工具。macOS 最低版本由内置 Patchright 的 Node 24 驱动要求决定，来源见[桌面说明](docs/desktop.md)。
 
-当前版本为 `0.1.6`，安装包见 [GitHub Release](https://github.com/ecojust/easy-publish/releases/tag/v0.1.6)。已实现的平台适配使用隔离的页面与 HTTP fixture 验证，**尚未完成真实账号登录及发布验收**；网站改版、账号权限和人工验证都可能影响实际操作。
+当前版本为 `0.1.7`，安装包见 [GitHub Release](https://github.com/ecojust/easy-publish/releases/tag/v0.1.7)。已实现的平台适配使用隔离的页面与 HTTP fixture 验证，**尚未完成真实账号登录及发布验收**；网站改版、账号权限和人工验证都可能影响实际操作。
 
 ## 平台能力
 
@@ -26,13 +26,13 @@
 
 ## 安装与下载
 
-从 [Release 页面](https://github.com/ecojust/easy-publish/releases/tag/v0.1.6) 下载对应安装包：
+从 [Release 页面](https://github.com/ecojust/easy-publish/releases/tag/v0.1.7) 下载对应安装包：
 
 | 系统 | 下载 |
 | --- | --- |
-| macOS Apple Silicon（M1–M5） | [ARM DMG](https://github.com/ecojust/easy-publish/releases/download/v0.1.6/Easy-Publish_0.1.6_macos-arm64.dmg) |
-| macOS Intel | [Intel DMG](https://github.com/ecojust/easy-publish/releases/download/v0.1.6/Easy-Publish_0.1.6_macos-x64.dmg) |
-| Windows x64 | [安装程序](https://github.com/ecojust/easy-publish/releases/download/v0.1.6/Easy-Publish_0.1.6_windows-x64-setup.exe) |
+| macOS Apple Silicon（M1–M5） | [ARM DMG](https://github.com/ecojust/easy-publish/releases/download/v0.1.7/Easy-Publish_0.1.7_macos-arm64.dmg) |
+| macOS Intel | [Intel DMG](https://github.com/ecojust/easy-publish/releases/download/v0.1.7/Easy-Publish_0.1.7_macos-x64.dmg) |
+| Windows x64 | [安装程序](https://github.com/ecojust/easy-publish/releases/download/v0.1.7/Easy-Publish_0.1.7_windows-x64-setup.exe) |
 
 升级前完全退出旧版。macOS 打开 DMG，将应用拖入“应用程序”；Windows 运行安装程序。Release 同时提供 `SHA256SUMS.txt`。后续开发构建仍可从成功的 [Actions 运行](https://github.com/ecojust/easy-publish/actions/workflows/build.yml) 下载 artifact 并解压 ZIP，Actions 下载通常需要登录 GitHub。
 
