@@ -10,7 +10,7 @@ from uuid import UUID
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ConfigDict, Field, StrictBool
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, model_validator
 
 from easy_publish.content import ContentInput, import_asset, preview_asset, render_article
 from easy_publish.article_templates import ArticleTemplateId
@@ -29,7 +29,15 @@ class AccountInput(Input):
 
 
 class AccountPreferencesInput(Input):
-    defaultSelected: StrictBool
+    # The route applies only explicitly supplied fields, preserving the others.
+    defaultSelected: StrictBool = True
+    wechatTemplateId: ArticleTemplateId = "clean"
+
+    @model_validator(mode="after")
+    def require_change(self):
+        if not self.model_fields_set:
+            raise ValueError("请提供需要修改的账号设置")
+        return self
 
 
 class AssetInput(Input):
@@ -51,6 +59,12 @@ class ArticlePreviewInput(Input):
     body: str = Field(default="", max_length=500_000)
     articleTemplateId: ArticleTemplateId = "clean"
     platformId: str | None = Field(default=None, max_length=40)
+    accountId: str | None = Field(default=None, min_length=1, max_length=128)
+
+
+class ArticleFormatInput(Input):
+    revision: int = Field(strict=True, ge=1)
+    requestId: UUID
 
 
 class McpCallInput(Input):
@@ -58,11 +72,11 @@ class McpCallInput(Input):
     arguments: dict = Field(default_factory=dict)
 
 
-def create_app(data_dir: Path, token: str, runtime=None, *, mcp_token: str | None = None, instance_id: str | None = None):
+def create_app(data_dir: Path, token: str, runtime=None, *, formatter=None, mcp_token: str | None = None, instance_id: str | None = None):
     if runtime is None:
         from easy_publish.runtime import Runtime
         runtime = Runtime(data_dir)
-    service = Service(data_dir, runtime)
+    service = Service(data_dir, runtime, formatter=formatter)
 
     @asynccontextmanager
     async def lifespan(app):
@@ -116,11 +130,7 @@ def create_app(data_dir: Path, token: str, runtime=None, *, mcp_token: str | Non
 
     @app.post("/api/preview/article")
     async def preview_article(value: ArticlePreviewInput):
-        from .article_templates import article_format_notes
-        if value.platformId is not None and (value.platformId not in BY_ID or "article" not in BY_ID[value.platformId]["kinds"]):
-            raise Problem("请选择支持文章的平台")
-        return {"html": render_article(value.body, value.articleTemplateId, value.platformId),
-                "notes": article_format_notes(value.platformId)}
+        return service.preview_article(value.body, value.articleTemplateId, value.platformId, value.accountId)
 
     @app.post("/api/mcp/call")
     async def mcp_call(value: McpCallInput):
@@ -140,6 +150,22 @@ def create_app(data_dir: Path, token: str, runtime=None, *, mcp_token: str | Non
         service.content_row(identifier)
         service.store.execute("DELETE FROM contents WHERE id=?", (identifier,))
         return {"ok": True}
+
+    @app.post("/api/contents/{identifier}/format")
+    async def format_article(identifier: str, value: ArticleFormatInput):
+        return service.start_article_format(identifier, value.revision, str(value.requestId))
+
+    @app.get("/api/format-jobs/{identifier}")
+    async def format_job(identifier: str):
+        return service.format_job(identifier)
+
+    @app.post("/api/format-jobs/{identifier}/cancel")
+    async def cancel_format_job(identifier: str):
+        return await service.cancel_article_format(identifier)
+
+    @app.post("/api/formatting/check")
+    async def check_formatting():
+        return await service.check_formatting()
 
     @app.post("/api/assets/import")
     async def add_asset(value: AssetInput):
@@ -170,7 +196,9 @@ def create_app(data_dir: Path, token: str, runtime=None, *, mcp_token: str | Non
 
     @app.put("/api/accounts/{identifier}/preferences")
     async def account_preferences(identifier: str, value: AccountPreferencesInput):
-        return service.set_account_preferences(identifier, value.defaultSelected)
+        changes = value.model_dump(exclude_unset=True)
+        names = {"defaultSelected": "default_selected", "wechatTemplateId": "wechat_template_id"}
+        return service.set_account_preferences(identifier, **{names[key]: item for key, item in changes.items()})
 
     @app.delete("/api/accounts/{identifier}")
     async def delete_account(identifier: str):

@@ -24,7 +24,18 @@ Easy Publish 使用 [MIT 许可证](LICENSE)。本文件记录直接参考或包
 
 参考 `src/views/skillapps/WechatPublisher.vue`、`WechatPublisherTemplate.js` 与 `src-tauri/addin/skills/wechat-publisher.zip` 中文章、正文图片、封面和公众号草稿的业务流程。该参考实现通过 `draft/add` 创建草稿；这不等于正式发布或向关注者群发。
 
-Easy Publish 的 [微信公众号适配器](engine/easy_publish/providers/wechat.py) 是独立编写的确定性官方 API 实现。它使用 AppID / AppSecret、内存访问令牌、图片上传、草稿与 `freepublish` 发布查询，分别记录草稿、受理和最终结果。文章模板另参考上述 ZIP 中 editorial、paper、forest、artdeco 与 blueprint 的版式方向，由本项目独立生成受控的内联 HTML／CSS；来源和兼容取舍见 [文章模板说明](docs/article-templates.md)。未引入 Wenyan CLI 或运行上游排版脚本，未复制 oDesk 的 AI / OpenCode 调度、技能包、脚本、配置或任何 token 缓存文件。
+Easy Publish 的 [微信公众号适配器](engine/easy_publish/providers/wechat.py) 是独立编写的确定性官方 API 实现。它使用 AppID / AppSecret、内存访问令牌、图片上传、草稿与 `freepublish` 发布查询，分别记录草稿、受理和最终结果。文章模板另参考上述 ZIP 中 editorial、paper、forest、artdeco 与 blueprint 的版式方向，由本项目独立生成受控的内联 HTML／CSS；来源和兼容取舍见 [文章模板说明](docs/article-templates.md)。原文整理流程参考 `WechatPublisher.vue` 与 `src/service/shell/opencode.ts` 的本地 OpenCode 调用方式；本项目独立实现受限整理任务、账号模板预览和版本检查。未引入 Wenyan CLI 或运行上游排版脚本，未复制 oDesk 的调度源码、技能包、脚本、配置或任何 token 缓存文件。
+
+## OpenCode
+
+- 项目：[anomalyco/opencode](https://github.com/anomalyco/opencode)
+- 内置版本：[v1.19.5](https://github.com/anomalyco/opencode/releases/tag/v1.19.5)
+- 固定提交：[`810c0eba1a7348036f8bdf61e6632d0c36c6876c`](https://github.com/anomalyco/opencode/tree/810c0eba1a7348036f8bdf61e6632d0c36c6876c)
+- 各目标归档与摘要：[opencode-runtime.json](scripts/opencode-runtime.json)
+- 许可证：MIT；Copyright (c) 2025 opencode
+- 完整原始许可：[vendor/opencode/LICENSE](vendor/opencode/LICENSE)
+
+安装包内置对应系统的官方 OpenCode 可执行文件，用于将纯文本整理为 Markdown。构建使用固定版本与 SHA-256 校验，不在用户电脑上下载并执行浮动最新版。原文整理通过本应用独立的工作目录、配置和受认证本地服务调用，不导入个人 OpenCode 账号或配置；发布仍由 Easy Publish 引擎执行。免费模型属于外部服务，其可用性和条款由服务提供方决定，MIT 许可不代表模型服务永久免费。
 
 ## biliup
 

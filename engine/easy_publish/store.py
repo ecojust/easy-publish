@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .catalog import bilibili_categories
+from .article_templates import TEMPLATE_IDS
 
 
 def now():
@@ -37,13 +38,16 @@ class Store:
         CREATE TABLE IF NOT EXISTS assets(id TEXT PRIMARY KEY, name TEXT NOT NULL, kind TEXT NOT NULL, size INTEGER NOT NULL, mime TEXT NOT NULL, path TEXT NOT NULL, text TEXT);
         CREATE TABLE IF NOT EXISTS accounts(id TEXT PRIMARY KEY, platform TEXT NOT NULL, label TEXT NOT NULL, status TEXT NOT NULL, message TEXT NOT NULL, updated TEXT NOT NULL, configured INTEGER NOT NULL);
         CREATE TABLE IF NOT EXISTS account_metadata(account_id TEXT PRIMARY KEY, bilibili_categories TEXT NOT NULL);
-        CREATE TABLE IF NOT EXISTS account_preferences(account_id TEXT PRIMARY KEY, default_selected INTEGER NOT NULL DEFAULT 1 CHECK(default_selected IN (0,1)));
+        CREATE TABLE IF NOT EXISTS account_preferences(account_id TEXT PRIMARY KEY, default_selected INTEGER NOT NULL DEFAULT 1 CHECK(default_selected IN (0,1)), wechat_template_id TEXT NOT NULL DEFAULT 'clean');
         CREATE TABLE IF NOT EXISTS batches(id TEXT PRIMARY KEY, request_id TEXT UNIQUE NOT NULL, content_id TEXT NOT NULL, title TEXT NOT NULL, kind TEXT NOT NULL, mode TEXT NOT NULL, created TEXT NOT NULL, snapshot TEXT NOT NULL, selection TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS tasks(id TEXT PRIMARY KEY, batch_id TEXT NOT NULL, account_id TEXT NOT NULL, account_label TEXT NOT NULL, platform TEXT NOT NULL, status TEXT NOT NULL, message TEXT NOT NULL, remote_id TEXT, url TEXT, fence INTEGER NOT NULL DEFAULT 0, started TEXT, finished TEXT);
         CREATE INDEX IF NOT EXISTS tasks_batch ON tasks(batch_id);
         CREATE INDEX IF NOT EXISTS batches_content ON batches(content_id);
-        PRAGMA user_version=3;
         """)
+        preference_columns = {row["name"] for row in self.db.execute("PRAGMA table_info(account_preferences)")}
+        if "wechat_template_id" not in preference_columns:
+            self.db.execute("ALTER TABLE account_preferences ADD COLUMN wechat_template_id TEXT NOT NULL DEFAULT 'clean'")
+        self.db.execute("PRAGMA user_version=4")
         self.db.commit()
 
     @contextmanager
@@ -77,7 +81,13 @@ class Store:
 
     def content(self, row):
         data = json.loads(row["data"])
+        from .article_formatting import format_ready
         data.setdefault("articleTemplateId", "clean")
+        data.setdefault("inputFormat", "markdown")
+        data.setdefault("sourceText", "")
+        data["formatReady"] = format_ready(data)
+        data.setdefault("formatModel", None)
+        data.pop("formatSourceHash", None)
         return {**data, "id": row["id"], "createdAt": row["created"],
                 "updatedAt": row["updated"], "revision": row["revision"],
                 "platformPublicationStates": self.publication_states(row["id"])}
@@ -105,11 +115,18 @@ class Store:
                 "defaultSelected": self.account_default_selected(row["id"])}
         if row["platform"] == "bilibili":
             result["bilibiliCategories"] = self.account_categories(row["id"]) if row["status"] == "ready" else []
+        if row["platform"] == "wechat":
+            result["wechatTemplateId"] = self.account_wechat_template(row["id"])
         return result
 
     def account_default_selected(self, identifier):
         row = self.one("SELECT default_selected FROM account_preferences WHERE account_id=?", (identifier,))
         return bool(row["default_selected"]) if row else True
+
+    def account_wechat_template(self, identifier):
+        row = self.one("SELECT wechat_template_id FROM account_preferences WHERE account_id=?", (identifier,))
+        value = row["wechat_template_id"] if row else "clean"
+        return value if value in TEMPLATE_IDS else "clean"
 
     @staticmethod
     def asset(row):

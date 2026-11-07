@@ -111,13 +111,14 @@ def test_new_templates_round_trip_to_the_wechat_queue_without_changing_preview(a
     from PIL import Image
     client, runtime, app = api
     account = ready_account(client, "wechat", credentials={"appId": "fixture-app", "appSecret": "fixture-secret"})
+    assert client.put(f"/api/accounts/{account['id']}/preferences", json={"wechatTemplateId": template}).status_code == 200
     image = tmp_path / "cover.png"
     Image.new("RGB", (3, 3), "green").save(image)
     imported = client.post("/api/assets/import", json={"path": str(image), "kind": "image"})
     assert imported.status_code == 200
     source = "## 一个新的章节\n\n正文 **重要信息**\n\n> 引用里的文字\n\n```text\n原样代码\n```"
     content = create_content(client, body=source, articleTemplateId=template, coverAssetId=imported.json()["id"])
-    preview = client.post("/api/preview/article", json={"body": source, "articleTemplateId": template, "platformId": "wechat"})
+    preview = client.post("/api/preview/article", json={"body": source, "accountId": account["id"], "platformId": "wechat"})
     assert preview.status_code == 200
     response = client.post("/api/batches", json=request_batch(content, [account]))
     assert response.status_code == 200

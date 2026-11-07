@@ -1,11 +1,13 @@
 import { useRef, useState } from "react";
 import { ArrowUpRight, Check, ExternalLink, FileText, Film, KeyRound, Link2, Plus, RefreshCw, ShieldCheck, Trash2, Users, X } from "lucide-react";
 import { bridge, errorMessage, request } from "./api";
+import { ArticleTemplateThumbnail } from "./MarkdownPreview";
 import { AccountBadge, dateLabel, EmptyState, InlineError, Modal, PlatformMark, Spinner } from "./ui";
-import type { Account, ContentKind, Platform, Runtime } from "./shared/types";
+import type { Account, ArticleTemplate, ArticleTemplateId, ContentKind, Platform, Runtime } from "./shared/types";
 
 interface Props {
   accounts: Account[];
+  articleTemplates: ArticleTemplate[];
   platforms: Platform[];
   runtime: Runtime;
   onRefresh: () => Promise<void>;
@@ -13,7 +15,7 @@ interface Props {
   onSettings: () => void;
 }
 
-export default function AccountsPage({ accounts, platforms, runtime, onRefresh, onNotice, onSettings }: Props) {
+export default function AccountsPage({ accounts, articleTemplates, platforms, runtime, onRefresh, onNotice, onSettings }: Props) {
   const [filter, setFilter] = useState<ContentKind | "all">("all");
   const [showAdd, setShowAdd] = useState(false);
   const [platformId, setPlatformId] = useState("");
@@ -23,6 +25,8 @@ export default function AccountsPage({ accounts, platforms, runtime, onRefresh, 
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [deleteAccount, setDeleteAccount] = useState<Account | null>(null);
+  const [templateAccount, setTemplateAccount] = useState<Account | null>(null);
+  const [templateId, setTemplateId] = useState<ArticleTemplateId>("clean");
   const operation = useRef(false);
   const platform = platforms.find((item) => item.id === platformId);
   const displayed = accounts.filter((account) => filter === "all" || platforms.find((item) => item.id === account.platformId)?.kinds.includes(filter));
@@ -62,7 +66,7 @@ export default function AccountsPage({ accounts, platforms, runtime, onRefresh, 
 
   return <div className="standard-page">
     <div className="page-heading"><div><div className="eyebrow">YOUR CHANNELS</div><h1>账号管理<span className="heading-count">{accounts.length}</span></h1><p>连接你的创作平台，每个平台可以添加多个账号。</p></div><button className="button primary" onClick={() => { setError(null); setShowAdd(true); }}><Plus size={17} />添加账号</button></div>
-    {!showAdd && !deleteAccount && <InlineError message={error} />}
+    {!showAdd && !deleteAccount && !templateAccount && <InlineError message={error} />}
     {!runtime.browserReady && <div className="setup-banner"><span className="setup-icon"><Link2 size={20} /></span><div><strong>{runtime.browserInstalling ? "正在准备发布浏览器" : "首次使用，准备发布浏览器"}</strong><p>{runtime.browserInstalling ? runtime.browserMessage : "扫码登录和网页发布需要独立浏览器，可以在设置中一键准备。"}</p></div><button className="button small" onClick={onSettings}>前往设置<ArrowUpRight size={14} /></button></div>}
     <div className="list-toolbar"><div className="filter-tabs">{([["all", "全部账号"], ["article", "文章平台"], ["video", "视频平台"]] as const).map(([value, title]) => <button key={value} className={filter === value ? "active" : ""} onClick={() => setFilter(value)}>{title}</button>)}</div><span className="list-count">{accounts.filter((account) => account.status === "ready").length} 个已连接</span></div>
     {displayed.length ? <div className="account-grid">{displayed.map((account) => {
@@ -78,15 +82,22 @@ export default function AccountsPage({ accounts, platforms, runtime, onRefresh, 
           void perform(`preferences:${account.id}`, async () => {
             await request<Account>("PUT", `/api/accounts/${account.id}/preferences`, { defaultSelected });
             await onRefresh();
-            onNotice(defaultSelected ? "已设为默认发布账号。" : "已取消默认选中，发布时仍可手动选择。");
+            onNotice(defaultSelected ? "已设为默认发布账号。" : "已关闭此账号的默认发布。");
           });
         }} /></label>
+        {account.platformId === "wechat" && <button className="account-template-button" aria-label={`设置 ${account.label} 文章模板`} disabled={!!busy} onClick={() => { setTemplateAccount(account); setTemplateId(account.wechatTemplateId || "clean"); setError(null); }}><FileText size={14} /><span>文章模板</span><strong>{articleTemplates.find((template) => template.id === (account.wechatTemplateId || "clean"))?.name || "清爽蓝"}</strong><ArrowUpRight size={13} /></button>}
         <div className="account-card-actions">{account.status === "logging_in" ? <button className="button small" disabled={!!busy} onClick={() => perform(`cancel:${account.id}`, async () => { await request("POST", `/api/accounts/${account.id}/cancel`); await onRefresh(); onNotice("连接操作已结束。"); })}>{busy === `cancel:${account.id}` ? <Spinner size={14} /> : <X size={14} />}取消连接</button> : <button className={`button small ${account.status !== "ready" ? "primary" : ""}`} disabled={!!busy || (item?.auth === "browser" && !runtime.browserReady)} onClick={() => perform(`login:${account.id}`, async () => { await request("POST", `/api/accounts/${account.id}/login`); await onRefresh(); onNotice(item?.auth === "wechat_api" ? "已开始检查公众号连接。" : "正在检查应用保存的会话，需要登录时会打开浏览器。"); })}>{busy === `login:${account.id}` ? <Spinner size={14} /> : <Link2 size={14} />}{account.status === "ready" ? "重新连接" : item?.auth === "wechat_api" ? "检查连接" : "登录账号"}</button>}
           <div><button className="icon-button" aria-label={`检查 ${account.label} 连接`} title="检查连接状态" disabled={!!busy || account.status === "logging_in"} onClick={() => perform(`check:${account.id}`, async () => { await request("POST", `/api/accounts/${account.id}/check`); await onRefresh(); onNotice("已请求检查账号状态。"); })}>{busy === `check:${account.id}` ? <Spinner size={15} /> : <RefreshCw size={15} />}</button><button className="icon-button" aria-label={`打开 ${item?.name || "平台"}`} title="打开创作平台" onClick={() => perform(`open:${account.id}`, async () => { if (item) await bridge().openExternal(item.homeUrl); })} disabled={!!busy}><ExternalLink size={15} /></button><button className="icon-button danger-hover" aria-label={`移除账号 ${account.label}`} title="移除本地账号" onClick={() => { setDeleteAccount(account); setError(null); }} disabled={!!busy}><Trash2 size={15} /></button></div>
         </div>
       </article>;
     })}</div> : <div className="panel"><EmptyState icon={<Users size={30} />} title={accounts.length ? "还没有这类平台的账号" : "让你的内容连接更多平台"} action={<button className="button primary" onClick={() => setShowAdd(true)}><Plus size={16} />添加第一个账号</button>}>添加账号并完成连接后，就可以把同一篇文章或视频发布到多个平台。</EmptyState></div>}
     <div className="privacy-note"><ShieldCheck size={16} /><p>登录会话保存在本机。公众号凭据加密保存，界面不会回显 AppSecret。</p></div>
+
+    {templateAccount && <Modal title={`${templateAccount.label} · 文章模板`} onClose={() => setTemplateAccount(null)} busy={!!busy}>
+      <p className="modal-description">为这个公众号选择文章版式，预览与发布会使用相同模板。</p><InlineError message={error} />
+      <div className="template-options" role="group" aria-label="公众号文章模板">{articleTemplates.map((template) => <button type="button" key={template.id} className={`template-option ${templateId === template.id ? "selected" : ""}`} aria-pressed={templateId === template.id} disabled={!!busy} onClick={() => setTemplateId(template.id)}><ArticleTemplateThumbnail templateId={template.id} /><span><strong>{template.name}</strong><small>{template.description}</small></span>{templateId === template.id && <Check size={14} />}</button>)}</div>
+      <div className="modal-actions"><button className="button" disabled={!!busy} onClick={() => setTemplateAccount(null)}>取消</button><button className="button primary" disabled={!!busy} onClick={() => perform(`template:${templateAccount.id}`, async () => { await request<Account>("PUT", `/api/accounts/${templateAccount.id}/preferences`, { wechatTemplateId: templateId }); await onRefresh(); setTemplateAccount(null); onNotice("公众号模板已保存。"); })}>{busy && <Spinner size={16} />}保存模板</button></div>
+    </Modal>}
 
     {showAdd && <Modal title="添加发布账号" onClose={closeAdd} busy={!!busy}><form onSubmit={(event) => { event.preventDefault(); void addAccount(); }}>
       <p className="modal-description">选择发布平台，为账号设置一个容易辨认的备注。</p><InlineError message={error} />
