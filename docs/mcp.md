@@ -27,6 +27,8 @@ macOS ARM、Intel 和 Windows 安装包都提供该入口，普通用户不需�
 | `list_batches` / `get_batch` | 查询任务和平台回执，支持历史批次 |
 | `cancel_batch` | 取消未完成工作，不能撤回已产生的平台内容 |
 
+`list_platforms` 的 `publishMethod` 区分 `browser` 与 `api`。网页发布平台（知乎、大鱼号、雪球、抖音、快手、小红书、视频号）仅自动上传填写，最终发布及确认按钮必须由用户在已打开的应用发布浏览器中点击。此时任务为非终态 `awaiting_user`；Agent 应提示用户操作并继续查询原批次，不能自动代点或重新创建任务。等待期间保持 Easy Publish 打开。微信公众号与 B 站仍通过接口提交，B 站登录使用浏览器不改变其投稿方式。
+
 文章只允许选择文章账号，视频只允许选择视频账号。显式混选会被后端拒绝。省略 `accountIds` 时，使用开启“发布时默认选中”（`defaultSelected: true`）、已连接、支持当前内容类型和操作的账号，并排除该稿件曾有 `submitted`、`published` 或 `unknown` 结果的平台。显式指定账号可覆盖默认偏好；全部兼容账号都关闭时不会回退到全选。同一 `requestId` 重试仍使用原目标，不受后续开关变化影响。
 
 ## 文章示例

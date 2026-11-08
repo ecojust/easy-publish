@@ -89,7 +89,7 @@ class Store:
 
     def recover(self):
         with self.transaction() as db:
-            db.execute("UPDATE tasks SET status=CASE WHEN fence=1 THEN 'unknown' ELSE 'cancelled' END, message=CASE WHEN fence=1 THEN '上次退出时正在提交，请先到平台核对结果' ELSE '应用已退出，任务未继续发布' END, finished=? WHERE status IN ('queued','running','submitting')", (now(),))
+            db.execute("UPDATE tasks SET status=CASE WHEN fence=1 THEN 'unknown' ELSE 'cancelled' END, message=CASE WHEN fence=1 THEN '上次退出时网页操作或提交尚未结束，请先到平台核对草稿和发布结果' ELSE '应用已退出，任务未继续发布' END, finished=? WHERE status IN ('queued','running','submitting','awaiting_user')", (now(),))
             db.execute("UPDATE accounts SET status='login_required',message='上次登录已中断，请重新连接',updated=? WHERE status='logging_in'", (now(),))
             db.execute("DELETE FROM account_metadata WHERE account_id NOT IN (SELECT id FROM accounts WHERE platform='bilibili' AND status='ready')")
 

@@ -211,15 +211,13 @@ class ZhihuArticle:
                 if self.prepare_only:
                     return result
 
-                # 发布按钮只有标题和正文满足编辑器要求后才可用；提交只触发一次。
-                publish = page.get_by_role("button", name="发布", exact=True)
-                await expect(publish).to_be_enabled()
+                # 用户负责发布和所有确认操作；等待不设置自动关窗期限。
                 submitted = True
-                result["status"] = "submission_unknown"
+                result["status"] = "awaiting_user"
                 result_file.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
-                await publish.click()
+                runtime.awaiting_user("知乎文章已填写，请在打开的网页检查并亲自点击发布；后续确认也请在网页完成")
                 # 草稿也有 /p/<id>/edit 地址；必须到正式详情页并读到作品标题才算发表。
-                await page.wait_for_url(re.compile(r"^https://zhuanlan\.zhihu\.com/p/\d+/?(?:\?.*)?$"), timeout=60000)
+                await page.wait_for_url(re.compile(r"^https://zhuanlan\.zhihu\.com/p/\d+/?(?:\?.*)?$"), timeout=0)
                 await expect(page.get_by_role("article").get_by_role("heading", name=self.title, exact=True)).to_be_visible()
                 result.update(success=True, status="published", url=page.url)
                 return result
@@ -231,6 +229,7 @@ class ZhihuArticle:
                         result["url"] = page.url
                 else:
                     result["status"] = "failed_before_submit"
+                await runtime.keep_manual_window(page)
                 if self.debug and page is not None:
                     screenshot = result_file.with_suffix(".png")
                     await page.screenshot(path=str(screenshot))

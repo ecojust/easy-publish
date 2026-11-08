@@ -255,55 +255,86 @@ async def test_upload_finish_is_media_evidence_not_publication():
     assert evidence.result is None and evidence.all_submissions == 0
 
 
+async def wait_for_handoff(events, seconds=3):
+    async with asyncio.timeout(seconds):
+        while not any(event["event"] == "awaiting_user" for event in events):
+            await asyncio.sleep(0.01)
+
+
 @pytest.mark.asyncio
-async def test_timeout_after_click_never_clicks_again(setup):
-    payload, ctx, _ = setup
+async def test_manual_wait_never_clicks_publish_or_existing_confirmation(setup):
+    payload, ctx, events = setup
     page = Page(Context())
-    button = Locator(True)
-    button.click.side_effect = TimeoutError("private browser error")
-    result = await ks._submit_once(page, button, ks.Evidence(), payload, ctx)
+    page.modal = Locator(True)
+    task = asyncio.create_task(ks._wait_for_manual_publish(page, ks.Evidence(), payload, ctx))
+    await wait_for_handoff(events)
+    await asyncio.sleep(0.03)
+    assert not task.done()
+    page.modal.click.assert_not_called()
+    page.closed = True
+    result = await task
     assert result.status == "unknown"
-    button.click.assert_awaited_once()
-    assert "private" not in result.message
 
 
 @pytest.mark.asyncio
 async def test_prior_manual_submission_is_not_submitted_again(setup):
-    payload, ctx, _ = setup
+    payload, ctx, events = setup
     evidence = ks.Evidence()
     evidence.all_submissions = 1
-    button = Locator(True)
-    result = await ks._submit_once(Page(Context()), button, evidence, payload, ctx)
-    assert result.status == "unknown"
-    button.click.assert_not_called()
+    evidence.result = ks.ProviderResult("submitted", "Earlier result")
+    page = Page(Context())
+    task = asyncio.create_task(ks._wait_for_manual_publish(page, evidence, payload, ctx))
+    await wait_for_handoff(events)
+    assert not task.done()
+    page.closed = True
+    assert (await task).status == "unknown"
 
 
 @pytest.mark.asyncio
-async def test_observed_receipt_completes_a_single_publish_click(setup):
-    payload, ctx, _ = setup
+async def test_manual_receipt_for_owned_video_allows_user_caption_changes(setup):
+    payload, ctx, events = setup
     context, evidence = Context(), ks.Evidence()
-    page, button = Page(context), Locator(True)
+    page = Page(context)
     evidence.upload_file_id = "owned-file"
-
-    async def click(**kwargs):
-        await context.response("/rest/cp/works/v3/video/pc/submit", {"result": 1},
-                               {"caption": ks.caption_text(payload.title, payload.description, payload.tags), "fileId": "owned-file"})
-
-    button.click.side_effect = click
     async with evidence.watch(context):
-        result = await ks._submit_once(page, button, evidence, payload, ctx)
+        task = asyncio.create_task(ks._wait_for_manual_publish(page, evidence, payload, ctx))
+        await wait_for_handoff(events)
+        assert not task.done() and evidence.all_submissions == 0
+        # Simulates the human's final click after making a correction on-page.
+        await context.response("/rest/cp/works/v3/video/pc/submit", {"result": 1},
+                               {"caption": "用户在网页修改了正文", "fileId": "owned-file"})
+        result = await asyncio.wait_for(task, 2)
     assert result.status == "submitted"
-    button.click.assert_awaited_once()
 
 
 @pytest.mark.asyncio
-async def test_missing_submission_response_stays_unknown(setup):
-    payload, ctx, _ = setup
-    button = Locator(True)
-    with patch.object(ks, "CONFIRM_SECONDS", 0.01):
-        result = await ks._submit_once(Page(Context()), button, ks.Evidence(), payload, ctx)
-    assert result.status == "unknown"
-    button.click.assert_awaited_once()
+async def test_failed_manual_receipt_keeps_window_open_until_user_closes(setup):
+    payload, ctx, events = setup
+    context, evidence = Context(), ks.Evidence()
+    page = Page(context)
+    evidence.upload_file_id = "owned-file"
+    async with evidence.watch(context):
+        task = asyncio.create_task(ks._wait_for_manual_publish(page, evidence, payload, ctx))
+        await wait_for_handoff(events)
+        await context.response("/rest/cp/works/v3/video/pc/submit", {"result": 0},
+                               {"caption": payload.title, "fileId": "owned-file"})
+        await asyncio.sleep(0.25)
+        assert not task.done()
+        assert any("窗口会保持打开" in item["message"] for item in events)
+        page.closed = True
+        assert (await task).status == "unknown"
+
+
+@pytest.mark.asyncio
+async def test_manual_wait_is_cancellable_without_a_publish_click(setup):
+    payload, ctx, events = setup
+    page = Page(Context())
+    task = asyncio.create_task(ks._wait_for_manual_publish(page, ks.Evidence(), payload, ctx))
+    await wait_for_handoff(events)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    page.modal.click.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -343,20 +374,31 @@ async def test_existing_platform_draft_is_preserved_before_upload(setup):
 
 
 @pytest.mark.asyncio
+async def test_uploaded_video_with_disabled_publish_does_not_delay_manual_handoff(setup):
+    _, _, _ = setup
+    page = Page(Context())
+    button = Locator(True)
+    button.is_enabled.return_value = False
+    evidence = ks.Evidence()
+    evidence.upload_file_id = "owned-file"
+    await asyncio.wait_for(ks._wait_upload(page, button, evidence), 0.2)
+    button.click.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_statement_requires_user_choice_and_is_never_selected_automatically(setup):
     _, ctx, events = setup
     page = Page(Context())
     placeholder = Locator(True)
     page.get_by_text = lambda *args, **kwargs: placeholder
-    with patch.object(ks, "LOGIN_SECONDS", 0.01), pytest.raises(ks.KuaishouError, match="作者声明未完成"):
-        await ks._wait_statement(page, ctx)
+    await ks._wait_statement(page, ctx)
     placeholder.click.assert_not_called()
     assert any("选择符合本次内容" in event["message"] for event in events)
 
 
 @pytest.mark.asyncio
-async def test_publish_failure_after_upload_cannot_be_retried(setup):
-    payload, ctx, _ = setup
+async def test_publish_failure_after_upload_keeps_window_for_manual_completion(setup):
+    payload, ctx, events = setup
     context = Context()
     page = Page(context)
 
@@ -365,7 +407,11 @@ async def test_publish_failure_after_upload_cannot_be_retried(setup):
         raise RuntimeError("remote upload may exist")
 
     with patch.object(ks, "_browser", browser(context, page)), patch.object(ks, "_prepare", prepare):
-        result = await ks.publish(payload, ctx)
+        task = asyncio.create_task(ks.publish(payload, ctx))
+        await wait_for_handoff(events)
+        assert not task.done()
+        page.closed = True
+        result = await task
     assert result.status == "unknown"
 
 
@@ -380,7 +426,7 @@ async def test_session_save_failure_does_not_erase_accepted_receipt(setup):
         return Locator(True)
 
     with patch.object(ks, "_browser", browser(context, page)), patch.object(ks, "_prepare", prepare), \
-         patch.object(ks, "_submit_once", AsyncMock(return_value=ks.ProviderResult("submitted", "Accepted"))), \
+         patch.object(ks, "_wait_for_manual_publish", AsyncMock(return_value=ks.ProviderResult("submitted", "Accepted"))), \
          patch.object(ks, "_save_session", AsyncMock(side_effect=OSError("fixture disk error"))):
         result = await ks.publish(payload, ctx)
     assert result.status == "submitted"
@@ -455,7 +501,7 @@ async def test_authentication_change_during_upload_stops_before_final_click(setu
         return Locator(True)
 
     with patch.object(ks, "_browser", browser(context, page)), patch.object(ks, "_prepare", prepare), \
-         patch.object(ks, "_submit_once", AsyncMock()) as submit:
+         patch.object(ks, "_wait_for_manual_publish", AsyncMock()) as submit:
         result = await ks.publish(payload, ctx)
     assert result.status == "unknown"
     submit.assert_not_called()
@@ -508,7 +554,7 @@ def test_final_topic_separator_is_reserved_at_caption_boundary():
 
 
 @pytest.mark.asyncio
-async def test_routed_browser_upload_topic_cover_and_single_submit(setup, monkeypatch):
+async def test_routed_browser_upload_topic_cover_and_manual_submit(setup, monkeypatch):
     """Uses only routed local HTML/API fixtures, never a platform account.
 
     Enable explicitly with EASY_PUBLISH_CHROMIUM=/path/to/chromium. Native
@@ -524,7 +570,7 @@ async def test_routed_browser_upload_topic_cover_and_single_submit(setup, monkey
     payload.tags = ["第一", "第二", "第三", "第四"]
     payload.cover_path = ctx.workspace / "cover.png"
     Image.new("RGB", (12, 12)).save(payload.cover_path)
-    requests, unexpected = [], []
+    requests, unexpected, pages = [], [], []
     html = r'''<!doctype html><meta charset="utf-8"><title>Offline Kuaishou fixture</title>
 <button class="_upload-btn_fixture">上传视频</button><input id="video-file" type="file" hidden>
 <div id="work-description-edit" contenteditable="true" style="display:none;min-height:90px;border:1px solid"></div>
@@ -590,13 +636,25 @@ document.getElementById('publish').onclick=async()=>{
                 browser_context = await browser.new_context()
                 await browser_context.route("**/*", route)
                 page = await browser_context.new_page()
+                pages.append(page)
                 yield browser_context, page
             finally:
                 await browser.close()
 
     monkeypatch.setattr(ks, "_browser", local_browser)
-    async with asyncio.timeout(20):
-        result = await ks.publish(payload, ctx)
+    task = asyncio.create_task(ks.publish(payload, ctx))
+    try:
+        async with asyncio.timeout(60):
+            await wait_for_handoff(events, seconds=45)
+            assert not task.done()
+            assert not [request for request in requests if request.url.endswith("/isolation/submit")]
+            # Fixture driver represents the human, not the publishing adapter.
+            await pages[0].get_by_role("button", name="发布", exact=True).click()
+            result = await task
+    finally:
+        if not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
     assert result.status == "submitted", result.message
     assert not unexpected
     submissions = [request for request in requests if request.url.endswith("/isolation/submit")]

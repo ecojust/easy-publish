@@ -20,33 +20,32 @@ def account(tmp_path):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("click_fails", [True, False])
-async def test_xhs_submit_attempt_and_missing_receipt_never_retry(account, monkeypatch, click_fails):
+async def test_xhs_manual_publish_does_not_resolve_or_click_a_button(account, monkeypatch):
     ctx, payload, events = account
-    button = MagicMock()
-    button.click = AsyncMock(side_effect=TimeoutError() if click_fails else None)
-    button.dispose = AsyncMock()
-    resolve = AsyncMock(return_value=button)
-    receipt = AsyncMock(side_effect=TimeoutError())
+    button = MagicMock(click=AsyncMock())
+    page = MagicMock()
+    page.is_closed.return_value = False
+    resolve = AsyncMock(side_effect=AssertionError("manual publishing must not resolve a button"))
+    receipt = AsyncMock(return_value=ProviderResult("submitted", "manual receipt"))
     monkeypatch.setattr(video, "_xhs_wait_submit_button", resolve)
-    monkeypatch.setattr(video, "_confirm_receipt", receipt)
-    result = await video._submit_once(MagicMock(), None, "xiaohongshu", payload, ctx)
-    assert result.status == "unknown"
-    resolve.assert_awaited_once()
-    button.click.assert_awaited_once_with(timeout=15_000)
-    button.dispose.assert_awaited_once()
-    assert receipt.await_count == (0 if click_fails else 1)
+    monkeypatch.setattr(video, "_manual_receipt", receipt)
+    monkeypatch.setattr(video, "_manual_success_notice", AsyncMock(return_value=False))
+    result = await video._submit_once(page, button, "xiaohongshu", payload, ctx)
+    assert result.status == "submitted"
+    resolve.assert_not_awaited()
+    button.click.assert_not_awaited()
+    assert events[-1]["event"] == "awaiting_user"
 
 
 @pytest.mark.asyncio
-async def test_xhs_readiness_failure_does_not_attempt_click(account, monkeypatch):
+async def test_xhs_closed_manual_window_is_unknown_without_a_click(account):
     ctx, payload, events = account
-    original = MagicMock(click=AsyncMock())
-    monkeypatch.setattr(video, "_xhs_wait_submit_button", AsyncMock(side_effect=video.VideoStageError("尚未点击发布")))
-    with pytest.raises(video.VideoStageError, match="尚未点击发布"):
-        await video._submit_once(MagicMock(), original, "xiaohongshu", payload, ctx)
-    original.click.assert_not_awaited()
-    assert not events
+    button = MagicMock(click=AsyncMock())
+    page = MagicMock()
+    page.is_closed.return_value = True
+    result = await video._submit_once(page, button, "xiaohongshu", payload, ctx)
+    assert result.status == "unknown"
+    button.click.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -121,7 +120,7 @@ async def fixture_page(markup):
 @pytest.mark.asyncio
 @browser_only
 @pytest.mark.parametrize("outside", ["", '<button disabled>发布</button>', '<button onclick="fetch(\'/fixture/wrong\')">发布</button>'])
-async def test_current_closed_component_submits_once_ignoring_unrelated_buttons(account, outside):
+async def test_current_closed_component_waits_for_user_ignoring_unrelated_buttons(account, outside):
     ctx, payload, events = account
     async with fixture_page(outside + "<xhs-publish-btn></xhs-publish-btn>") as (page, calls):
         # Faithful main-world component: the root remains closed. Patchright's
@@ -129,19 +128,28 @@ async def test_current_closed_component_submits_once_ignoring_unrelated_buttons(
         assert await page.locator("xhs-publish-btn").evaluate("el => el.shadowRoot === null", isolated_context=False)
         if "disabled" in outside:
             assert not await page.get_by_role("button", name="发布", exact=True).first.is_enabled()
-        result = await video._submit_once(page, None, "xiaohongshu", payload, ctx)
+        waiting = asyncio.create_task(video._submit_once(page, None, "xiaohongshu", payload, ctx))
+        await asyncio.sleep(0.3)
+        assert not waiting.done() and calls == []
+        assert events[-1]["event"] == "awaiting_user"
+        # Simulate the user's click, including the current closed component.
+        await page.locator("xhs-publish-btn").get_by_role("button", name="发布", exact=True).click()
+        result = await asyncio.wait_for(waiting, 3)
         assert result.status == "submitted"
         assert calls == ["/fixture/submit"]
-        assert any("正在确认发布按钮可用" in event.get("message", "") for event in events)
 
 
 @pytest.mark.asyncio
 @browser_only
-async def test_legacy_composer_submits_without_current_component(account):
+async def test_legacy_composer_waits_for_user_without_current_component(account):
     ctx, payload, events = account
     markup = '<button onclick="fetch(\'/fixture/submit\', {method:\'POST\'}).then(()=>location.href=\'/publish/success\')">发布</button>'
     async with fixture_page(markup) as (page, calls):
-        result = await video._submit_once(page, None, "xiaohongshu", payload, ctx)
+        waiting = asyncio.create_task(video._submit_once(page, None, "xiaohongshu", payload, ctx))
+        await asyncio.sleep(0.3)
+        assert not waiting.done() and calls == []
+        await page.get_by_role("button", name="发布", exact=True).click()
+        result = await asyncio.wait_for(waiting, 3)
         assert result.status == "submitted"
         assert calls == ["/fixture/submit"]
 

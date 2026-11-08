@@ -13,7 +13,7 @@ import subprocess
 import sys
 import threading
 
-from .providers.base import ProviderContext, ProviderResult, PublishPayload
+from .providers.base import BROWSER_PUBLISH_PLATFORMS, ProviderContext, ProviderResult, PublishPayload
 
 
 def _parent_running(pid: int) -> bool:
@@ -128,7 +128,7 @@ def worker_main() -> int:
     def emit(event: dict) -> None:
         nonlocal submitted
         name = event.get("event")
-        if name not in {"progress", "submitting"}:
+        if name not in {"progress", "submitting", "awaiting_user"}:
             return
         if name == "submitting":
             if submitted:
@@ -139,6 +139,13 @@ def worker_main() -> int:
             if not ack or json.loads(ack) != {"ack": "submitting"}:
                 raise RuntimeError("Mutation fence not acknowledged")
             submitted = True
+        elif name == "awaiting_user":
+            if not submitted or operation != "publish" or payload.platform_id not in BROWSER_PUBLISH_PLATFORMS:
+                raise RuntimeError("Unexpected manual publication handoff")
+            write({"event": name, "message": event.get("message", "请在网页中手动发布")})
+            ack = sys.stdin.buffer.readline(4096).decode("utf-8")
+            if not ack or json.loads(ack) != {"ack": "awaiting_user"}:
+                raise RuntimeError("Manual publication handoff not acknowledged")
         else:
             write({"event": name, "message": event.get("message", "")})
 

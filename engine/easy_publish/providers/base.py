@@ -4,6 +4,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Literal
 
+BROWSER_PUBLISH_PLATFORMS = frozenset({"zhihu", "dayu", "xueqiu", "douyin", "kuaishou", "xiaohongshu", "channels"})
+
 ResultStatus = Literal["ready", "login_required", "draft_created", "submitted", "published", "needs_attention", "failed", "unknown"]
 
 @dataclass
@@ -46,3 +48,8 @@ class ProviderContext:
     def submitting(self, message: str = "正在向平台提交") -> None:
         # Must run BEFORE the first content-mutating request/click.
         self.emit({"event": "submitting", "message": message})
+
+    def awaiting_user(self, message: str = "请在已打开的网页中核对内容并手动点击发布") -> None:
+        # A live handoff, not a result: the worker/browser must remain owned.
+        # Upload/editor mutations must already have crossed the durable fence.
+        self.emit({"event": "awaiting_user", "message": message})

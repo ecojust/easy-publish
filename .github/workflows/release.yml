@@ -6,7 +6,7 @@ on:
       tag:
         description: Existing release tag
         required: true
-        default: v0.1.9
+        default: v0.1.10
       build_run_id:
         description: Successful desktop build run containing all three installers
         required: true

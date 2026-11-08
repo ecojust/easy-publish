@@ -1,6 +1,6 @@
 import { useEffect, useRef, type CSSProperties, type ReactNode } from "react";
 import { AlertCircle, CheckCircle2, Clock3, LoaderCircle, X } from "lucide-react";
-import type { Account, Platform, TaskStatus } from "./shared/types";
+import type { Account, Platform, PublishMode, TaskStatus } from "./shared/types";
 
 export function Spinner({ size = 16 }: { size?: number }) {
   return <LoaderCircle size={size} className="spinner" aria-hidden="true" />;
@@ -11,7 +11,7 @@ export function PlatformMark({ platform, size = "normal" }: { platform?: Platfor
 }
 
 const taskLabels: Record<TaskStatus, string> = {
-  queued: "等待处理", running: "处理中", submitting: "正在提交", draft_created: "已存平台草稿",
+  queued: "等待处理", running: "处理中", submitting: "正在提交", awaiting_user: "等待手动发布", draft_created: "已存平台草稿",
   submitted: "已提交，待平台处理", published: "已发布", needs_attention: "需要处理",
   failed: "失败", cancelled: "已取消", unknown: "结果待确认",
 };
@@ -19,10 +19,20 @@ const taskLabels: Record<TaskStatus, string> = {
 export function TaskBadge({ status }: { status: TaskStatus }) {
   const active = ["running", "submitting"].includes(status);
   const positive = ["published", "draft_created"].includes(status);
-  const caution = ["needs_attention", "unknown"].includes(status);
+  const caution = ["awaiting_user", "needs_attention", "unknown"].includes(status);
   return <span className={`status-badge ${positive ? "positive" : status === "failed" ? "negative" : caution ? "caution" : active || status === "submitted" ? "accent" : "neutral"}`}>
     {active ? <Spinner size={12} /> : positive ? <CheckCircle2 size={12} /> : caution || status === "failed" ? <AlertCircle size={12} /> : <Clock3 size={12} />}{taskLabels[status]}
   </span>;
+}
+
+export function PublishMethodNotice({ platforms, mode }: { platforms: Platform[]; mode: PublishMode }) {
+  if (mode !== "publish" || !platforms.length) return null;
+  const browser = platforms.filter((platform) => platform.publishMethod === "browser").map((platform) => platform.name);
+  const direct = platforms.filter((platform) => platform.publishMethod === "api").map((platform) => platform.name);
+  return <div className="publish-method-notice" aria-label="本次发布方式">
+    {browser.length > 0 && <p><strong>需在网页手动发布：{browser.join("、")}</strong><span>应用负责上传素材和填写内容。请在已打开的发布窗口中核对，再亲自点击发布及确认按钮。</span></p>}
+    {direct.length > 0 && <p>{direct.join("、")}由应用直接提交，无需网页确认。</p>}
+  </div>;
 }
 
 const accountLabels: Record<Account["status"], string> = {

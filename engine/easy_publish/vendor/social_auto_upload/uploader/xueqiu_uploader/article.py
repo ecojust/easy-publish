@@ -192,7 +192,7 @@ class XueqiuArticle:
             raise RuntimeError("雪球填写期间账号发生变化，已中止")
 
     async def main(self) -> dict:
-        """准备模式保留草稿和预览；提交模式只点击一次，结果未知时禁止自动重发。"""
+        """准备模式保留草稿和预览；发布由用户点击，仅观察和核对回执。"""
         self.validate_upload_args()
         results_dir = self.account_file.parent / "xueqiu_results"
         results_dir.mkdir(exist_ok=True)
@@ -229,17 +229,14 @@ class XueqiuArticle:
                 await page.locator('div[class*="index_preview_"] > div[class*="index_close_"]').click()
                 # 关闭后组件仍保留在 DOM，由父层隐藏；不能要求节点被删除。
                 await expect(page.locator('div[class*="index_preview-content_"]')).to_be_hidden()
-                publish = page.get_by_role("button", name="发布", exact=True)
-                # 页面用 class 表达禁用态，不能仅依赖 HTML disabled；保留语义前缀排除哈希变化。
-                await expect(publish).not_to_have_class(re.compile(r".*publish_disabled_.*"), timeout=30000)
-                result.update(status="submission_unknown", editor_url=page.url)
+                result.update(status="awaiting_user", editor_url=page.url)
                 result_file.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
                 # 实测最终发表 POST /xq/statuses/update.json 返回作品 ID、user_id、title、text、is_private。
                 # 页面随后回首页，因此不能用“跳转作者详情”这一错误假设判断成功。
                 async with page.expect_response(lambda response: response.request.method == "POST"
                                                 and response.url == "https://mp.xueqiu.com/xq/statuses/update.json",
-                                                timeout=60000) as submitted:
-                    await publish.click()
+                                                timeout=0) as submitted:
+                    runtime.awaiting_user("雪球文章已填写，请在打开的网页检查并亲自点击发布；后续确认也请在网页完成")
                 response = await submitted.value
                 payload = await response.json()
                 content_id = payload.get("id")
@@ -273,6 +270,7 @@ class XueqiuArticle:
                 result["error"] = str(exc)
                 if result["status"] == "preparing":
                     result["status"] = "failed"
+                await runtime.keep_manual_window(page)
                 if self.debug and page is not None:
                     await page.screenshot(path=str(result_file.with_suffix(".error.png")), full_page=True)
                 raise

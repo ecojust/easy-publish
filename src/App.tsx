@@ -56,7 +56,7 @@ export default function App() {
     return () => window.clearTimeout(timer);
   }, [notice]);
 
-  const pending = state?.batches.reduce((count, batch) => count + batch.tasks.filter((task) => ["queued", "running", "submitting"].includes(task.status)).length, 0) || 0;
+  const pending = state?.batches.reduce((count, batch) => count + batch.tasks.filter((task) => ["queued", "running", "submitting", "awaiting_user"].includes(task.status)).length, 0) || 0;
   const connected = state?.accounts.filter((account) => account.status === "ready").length || 0;
 
   return <div className="app-shell">

@@ -1,4 +1,4 @@
-"""Local library, immutable batch snapshots, and a serial publishing queue."""
+"""Local library, immutable batch snapshots, and a bounded publishing queue with manual browser handoffs."""
 from __future__ import annotations
 
 import asyncio
@@ -13,10 +13,12 @@ from easy_publish.content import ContentInput, image_sources, markdown_html, ren
 from easy_publish.target_projection import project_content, target_options
 from easy_publish.store import Store, dump, now, uid
 from easy_publish.vault import VaultError
+from easy_publish.providers.base import BROWSER_PUBLISH_PLATFORMS
 from easy_publish.wenyan_runtime import WenyanError, WenyanRenderer
 
 
 _UNSET = object()
+MAX_PUBLISH_JOBS = 3
 
 
 class Problem(Exception):
@@ -36,6 +38,8 @@ class Service:
         self.store = Store(data_dir)
         self.wake = asyncio.Event()
         self.jobs = {}
+        self.publishing_jobs = {}
+        self.publishing_accounts = {}
         self.account_cancellations = {}
         self.queue_task = None
         self.closing = False
@@ -69,10 +73,10 @@ class Service:
         self.closing = True
         await self.wenyan.close()
         await self.runtime.shutdown()
-        for task in [self.queue_task, *self.jobs.values()]:
+        for task in [self.queue_task, *self.jobs.values(), *self.publishing_jobs.values()]:
             if task and not task.cancelling():
                 task.cancel()
-        await asyncio.gather(*(t for t in [self.queue_task, *self.jobs.values()] if t), return_exceptions=True)
+        await asyncio.gather(*(t for t in [self.queue_task, *self.jobs.values(), *self.publishing_jobs.values()] if t), return_exceptions=True)
         await asyncio.gather(*list(self.account_cancellations.values()), return_exceptions=True)
         self.store.recover()
         self.store.close()
@@ -128,7 +132,7 @@ class Service:
         return self.store.content(self.content_row(identifier))
 
     def busy_account(self, identifier):
-        return self.store.one("SELECT id FROM tasks WHERE account_id=? AND status IN ('queued','running','submitting')", (identifier,)) or identifier in self.jobs or identifier in self.account_cancellations
+        return self.store.one("SELECT id FROM tasks WHERE account_id=? AND status IN ('queued','running','submitting','awaiting_user')", (identifier,)) or identifier in self.publishing_accounts.values() or identifier in self.jobs or identifier in self.account_cancellations
 
     def add_account(self, platform_id, label, credentials):
         platform = BY_ID.get(platform_id)
@@ -504,25 +508,55 @@ class Service:
     async def queue_loop(self):
         while not self.closing:
             self.wake.clear()
-            task = self.store.one("SELECT * FROM tasks WHERE status='queued' ORDER BY rowid LIMIT 1")
-            if task:
-                await self.run_task(task)
-            else:
-                await self.wake.wait()
+            # Only one target prepares/uploads at a time. Waiting for a person
+            # releases that preparation slot, but never its account ownership.
+            preparing = self.store.one("SELECT id FROM tasks WHERE status IN ('running','submitting') LIMIT 1")
+            if not preparing and len(self.publishing_jobs) < MAX_PUBLISH_JOBS:
+                owned_accounts = set(self.publishing_accounts.values()) | self.jobs.keys() | self.account_cancellations.keys()
+                task = next((row for row in self.store.all("SELECT * FROM tasks WHERE status='queued' ORDER BY rowid")
+                             if row["account_id"] not in owned_accounts), None)
+                if task:
+                    identifier = task["id"]
+                    # Reserve before scheduling so a second queue turn cannot
+                    # launch this task twice or overlap a preparation phase.
+                    self.store.execute("UPDATE tasks SET status='running',message='正在准备',started=?,finished=NULL WHERE id=?", (now(), identifier))
+                    self.publishing_accounts[identifier] = task["account_id"]
+                    job = asyncio.create_task(self.run_task(task))
+                    self.publishing_jobs[identifier] = job
+                    job.add_done_callback(lambda finished, identifier=identifier: self._publishing_done(identifier, finished))
+                    continue
+            await self.wake.wait()
+
+    def _publishing_done(self, identifier, job):
+        # A coroutine cancelled before its first turn never enters its finally
+        # block. A done callback releases ownership in that case as well.
+        if self.publishing_jobs.get(identifier) is job:
+            self.publishing_jobs.pop(identifier, None)
+            self.publishing_accounts.pop(identifier, None)
+        if not job.cancelled():
+            job.exception()  # Retrieve an unexpected exception, never log data.
+        self.wake.set()
 
     async def run_task(self, task):
         identifier = task["id"]
         batch = self.store.one("SELECT * FROM batches WHERE id=?", (task["batch_id"],))
         content = json.loads(batch["snapshot"])
-        self.store.execute("UPDATE tasks SET status='running',message='正在准备',started=?,finished=NULL WHERE id=?", (now(), identifier))
+        current = self.store.one("SELECT status FROM tasks WHERE id=?", (identifier,))
+        if not current or current["status"] != "running":
+            return
         async def event(value):
             row = self.store.one("SELECT * FROM tasks WHERE id=?", (identifier,))
-            if row["status"] not in {"running", "submitting"}:
+            if row["status"] not in {"running", "submitting", "awaiting_user"}:
                 # Stop this worker without cancelling the shared queue loop.
                 raise RuntimeError("Task no longer active")
             if value.get("event") == "submitting":
                 # Runtime acknowledges this only after the durable SQLite commit.
                 self.store.execute("UPDATE tasks SET status='submitting',fence=1,message=? WHERE id=?", (value.get("message", "正在提交")[:500], identifier))
+            elif value.get("event") == "awaiting_user":
+                if not row["fence"] or task["platform"] not in BROWSER_PUBLISH_PLATFORMS:
+                    raise RuntimeError("Manual handoff requires a fenced browser task")
+                self.store.execute("UPDATE tasks SET status='awaiting_user',message=? WHERE id=?", (value.get("message", "请在网页中手动发布")[:500], identifier))
+                self.wake.set()
             elif value.get("event") == "progress":
                 self.store.execute("UPDATE tasks SET message=? WHERE id=?", (value.get("message", "正在处理")[:500], identifier))
         try:
@@ -539,7 +573,7 @@ class Service:
         except Exception:
             result = {"status": "failed", "message": "发布引擎未完成，请检查账号和运行环境"}
         current = self.store.one("SELECT * FROM tasks WHERE id=?", (identifier,))
-        if current["status"] not in {"running", "submitting"}:
+        if current["status"] not in {"running", "submitting", "awaiting_user"}:
             return
         status = result.get("status", "failed")
         if status == "login_required":
@@ -558,16 +592,29 @@ class Service:
                            (status, message, result.get("remote_id"), result.get("url"), now(), identifier))
 
     def interrupt_task(self, identifier):
-        self.store.execute("UPDATE tasks SET status=CASE WHEN fence=1 THEN 'unknown' ELSE 'cancelled' END,message=CASE WHEN fence=1 THEN '提交已中断，请到平台核对结果，勿直接重发' ELSE '任务已取消' END,finished=? WHERE id=? AND status IN ('queued','running','submitting')", (now(), identifier))
+        self.store.execute("UPDATE tasks SET status=CASE WHEN fence=1 THEN 'unknown' ELSE 'cancelled' END,message=CASE WHEN fence=1 THEN '网页操作或提交已中断，请到平台核对草稿和发布结果，勿直接重发' ELSE '任务已取消' END,finished=? WHERE id=? AND status IN ('queued','running','submitting','awaiting_user')", (now(), identifier))
 
     async def cancel_batch(self, identifier):
         require(self.store.one("SELECT id FROM batches WHERE id=?", (identifier,)))
-        for row in self.store.all("SELECT * FROM tasks WHERE batch_id=? AND status IN ('queued','running','submitting')", (identifier,)):
+        rows = self.store.all("SELECT * FROM tasks WHERE batch_id=? AND status IN ('queued','running','submitting','awaiting_user')", (identifier,))
+        # Mark the whole batch before yielding. Otherwise a finishing browser
+        # could let the queue start another target while cancellation is pending.
+        for row in rows:
             self.interrupt_task(row["id"])
-            if row["status"] != "queued":
-                await self.runtime.cancel(row["id"])
+        jobs = [self.publishing_jobs[row["id"]] for row in rows if row["id"] in self.publishing_jobs]
+        for job in jobs:
+            if not job.done() and not job.cancelling():
+                job.cancel()
+        if jobs:
+            # Runtime.run owns cleanup on task cancellation. Do not call
+            # Runtime.cancel before run starts: its marker would poison retry.
+            # A disconnected API caller must not interrupt process-tree cleanup.
+            await asyncio.shield(asyncio.gather(*jobs, return_exceptions=True))
+        self.wake.set()
 
     def retry_task(self, identifier):
+        if identifier in self.publishing_jobs:
+            raise Problem("任务仍在运行或清理发布窗口，请稍后再试", "retry_not_allowed", 409)
         task = require(self.store.one("SELECT * FROM tasks WHERE id=?", (identifier,)))
         if not self.store.task(task)["canRetry"]:
             raise Problem("此任务不能直接重试；请先到平台核对结果", "retry_not_allowed", 409)

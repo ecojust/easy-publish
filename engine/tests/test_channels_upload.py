@@ -185,9 +185,10 @@ def test_page_states_have_specific_errors(change, message):
 
 
 @pytest.mark.asyncio
-async def test_cover_lost_after_reload_stops_before_submit(account, monkeypatch):
+async def test_cover_lost_after_reload_stops_before_draft_save(account, monkeypatch):
     ctx, payload, _ = account
     payload.cover_path = payload.video_path
+    payload.mode = "draft"
     frame = fake_frame(upload_state(payload))
     monkeypatch.setattr(video, "_channels_wait_upload", AsyncMock(return_value=frame))
     old_document = MagicMock()
@@ -198,8 +199,9 @@ async def test_cover_lost_after_reload_stops_before_submit(account, monkeypatch)
 
 
 @pytest.mark.asyncio
-async def test_channels_submit_timeout_never_clicks_twice(account, monkeypatch):
+async def test_channels_draft_save_timeout_never_clicks_twice(account, monkeypatch):
     ctx, payload, _ = account
+    payload.mode = "draft"
     frame = fake_frame(upload_state(payload))
     button = MagicMock()
     button.first = button
@@ -371,6 +373,14 @@ async def test_real_browser_98_percent_remount_refill_cover_and_single_submissio
             await asyncio.sleep(1.1)
             assert not task.done() and not closed and not submissions
             cover_response.set()
+            if mode == "publish":
+                async with asyncio.timeout(10):
+                    while not any(event["event"] == "awaiting_user" for event in events):
+                        await asyncio.sleep(0.05)
+                await asyncio.sleep(0.3)
+                assert not task.done() and not closed and not submissions
+                # Test driver acts as the user; provider never clicks this.
+                await current.get_by_role("button", name="发表", exact=True).click()
             result = await asyncio.wait_for(task, timeout=10)
             assert result.status == ("draft_created" if mode == "draft" else "submitted")
             assert closed and len(uploads) == 1 and not stale_covers

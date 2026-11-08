@@ -4,9 +4,9 @@ export type ArticleTemplateId = "wenyan-default" | "wenyan-orangeheart" | "wenya
 export interface ArticleTemplate { id: ArticleTemplateId; name: string; description: string; accent: string; }
 export interface ArticlePreview { html: string; notes: string[]; }
 export interface McpConfiguration { command: string; args: string[]; env?: Record<string, string>; }
-export type TaskStatus = "queued" | "running" | "submitting" | "draft_created" | "submitted" | "published" | "needs_attention" | "failed" | "cancelled" | "unknown";
+export type TaskStatus = "queued" | "running" | "submitting" | "awaiting_user" | "draft_created" | "submitted" | "published" | "needs_attention" | "failed" | "cancelled" | "unknown";
 export interface PlatformField { key: string; label: string; type: "select" | "text"; required: boolean; kinds: ContentKind[]; choices?: { value: string; label: string }[]; dynamicChoices?: "bilibiliCategories"; hint?: string; }
-export interface Platform { id: string; name: string; color: string; kinds: ContentKind[]; modes: PublishMode[]; auth: "browser" | "wechat_api"; titleLimit: number; description: string; homeUrl: string; fields: PlatformField[]; }
+export interface Platform { id: string; name: string; color: string; kinds: ContentKind[]; modes: PublishMode[]; auth: "browser" | "wechat_api"; publishMethod: "browser" | "api"; titleLimit: number; description: string; homeUrl: string; fields: PlatformField[]; }
 export interface Asset { id: string; name: string; kind: "video" | "image" | "article"; size: number; mime: string; text?: string; }
 export interface ContentInput { inputFormat: "markdown"; sourceText: string; kind: ContentKind; title: string; body: string; description: string; tags: string[]; author: string; videoAssetId: string | null; coverAssetId: string | null; imageAssetIds: string[]; platformOptions: Record<string, Record<string, string>>; videoOptionsSource?: "account" | "content"; articleTemplateId: ArticleTemplateId; }
 export interface Content extends ContentInput { id: string; createdAt: string; updatedAt: string; revision: number; platformPublicationStates: Record<string, "submitted" | "published" | "unknown">; }

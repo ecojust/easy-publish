@@ -1,4 +1,4 @@
-"""Kuaishou browser login and single-attempt video publishing.
+"""Kuaishou browser login, assisted preparation and user-controlled publishing.
 
 Browser flows reference dreammis/social-auto-upload at
 3847fff01f5434a8a32829833163cd6723cabc59 (MIT). See KUAISHOU_SOURCES.md.
@@ -24,7 +24,6 @@ UPLOAD_BUTTON = "button[class^='_upload-btn']"
 LOGIN_SECONDS = 600
 CHECK_SECONDS = 35
 UPLOAD_SECONDS = 20 * 60
-CONFIRM_SECONDS = 60
 VIDEO_EXTENSIONS = {".mp4", ".mov", ".m4v", ".webm"}
 CAPTION_LIMIT = 500
 TAG_LIMIT = 4  # Current client default; individual account settings can differ.
@@ -120,6 +119,7 @@ class Evidence:
     def __init__(self):
         self.identity: str | None = None
         self.armed_caption: str | None = None
+        self.manual = False
         self.submit_requests: list = []
         self.all_submissions = 0
         self.ambiguous = False
@@ -152,7 +152,7 @@ class Evidence:
             data = request.post_data_json
             valid = (self.armed_caption is not None and isinstance(data, dict)
                      and isinstance(data.get("caption"), str)
-                     and _normalize_caption(data["caption"]) == self.armed_caption
+                     and (self.manual or _normalize_caption(data["caption"]) == self.armed_caption)
                      and isinstance(data.get("fileId"), (str, int)) and not isinstance(data.get("fileId"), bool)
                      and str(data["fileId"]) == self.upload_file_id)
         except Exception:
@@ -383,27 +383,16 @@ async def _wait_upload(page, button, evidence: Evidence) -> None:
             if evidence.upload_failed or await _visible(page.get_by_text(re.compile(r"上传失败|处理失败|转码失败"))):
                 raise KuaishouError("快手未能完成视频上传，请先到平台检查，不会自动重新上传")
             if (evidence.upload_file_id and not await _visible(page.get_by_text(re.compile(r"^上传中(?:\s|$)")))
-                    and await _visible(button) and await button.is_enabled()):
+                    and await _visible(button)):
                 return
             await asyncio.sleep(0.5)
 
 
 async def _wait_statement(page, ctx: ProviderContext) -> None:
-    # Some accounts have a required, server-configured list of author
-    # statements. The user must choose the declaration that describes the work;
-    # never choose the first option or falsely label it as original/AI-free.
-    placeholder = page.get_by_text("请选择作者声明", exact=True)
-    if not await _visible(placeholder):
-        return
-    ctx.progress("快手要求作者声明，请在发布浏览器中选择符合本次内容的声明，选择后将继续投稿")
-    try:
-        async with asyncio.timeout(LOGIN_SECONDS):
-            while await _visible(placeholder):
-                if page.is_closed():
-                    raise KuaishouError("快手窗口已关闭，作者声明尚未完成；请到平台检查草稿")
-                await asyncio.sleep(0.5)
-    except TimeoutError:
-        raise KuaishouError("快手作者声明未完成，尚未点击发布；请在创作中心检查已上传的草稿") from None
+    # Author declarations remain the user's choice. They can disable the final
+    # button, so they must not delay the handoff or trigger a timed browser close.
+    if await _visible(page.get_by_text("请选择作者声明", exact=True)):
+        ctx.progress("快手要求作者声明，请在网页选择符合本次内容的声明，然后手动点击发布")
 
 
 async def _prepare(page, payload: PublishPayload, ctx: ProviderContext, evidence: Evidence):
@@ -450,41 +439,34 @@ async def _prepare(page, payload: PublishPayload, ctx: ProviderContext, evidence
     return button
 
 
-async def _submit_once(page, button, evidence: Evidence, payload: PublishPayload,
-                       ctx: ProviderContext) -> ProviderResult:
-    if evidence.all_submissions:
-        return ProviderResult("unknown", "快手页面已发生投稿请求，尚未再次点击发布；请到创作中心核对", url=MANAGE_URL)
-    # An existing confirmation could belong to manual interaction while media
-    # uploaded. Do not confirm a dialog whose initiating click we did not own.
-    modal_selector = "div.ant-modal-confirm:visible, div.ant-modal-confirm-centered:visible"
-    if await _visible(page.locator(modal_selector)):
-        return ProviderResult("unknown", "快手页面已有确认弹窗，无法确认来源；请先在创作中心核对", url=MANAGE_URL)
+async def _wait_for_manual_publish(page, evidence: Evidence, payload: PublishPayload,
+                                   ctx: ProviderContext, message: str | None = None) -> ProviderResult:
+    """Observe the owned upload; never click publish or a confirmation dialog.
+
+    The user can correct the text before publishing. The receipt is bound to
+    this page's uploaded file ID and its initiating request, rather than to
+    an immutable caption. Rejected or ambiguous requests keep the window open.
+    """
+    if page.is_closed():
+        return ProviderResult("unknown", "快手窗口已关闭，未取得本次发布回执；请到创作中心核对", url=MANAGE_URL)
+    if evidence.all_submissions or evidence.result is not None:
+        # A request predating this handoff cannot prove the user completed it.
+        evidence.ambiguous = True
+    evidence.manual = True
     evidence.armed_caption = _normalize_caption(caption_text(payload.title, payload.description, payload.tags))
-    ctx.progress("正在向快手提交一次投稿，等待平台确认")
-    confirmed = False
-    try:
-        # One publish click, at most one matching explicit confirmation. A
-        # timeout can occur after a remote write; this method never retries.
-        await button.click(timeout=15_000)
-        async with asyncio.timeout(CONFIRM_SECONDS):
-            while True:
-                if evidence.ambiguous or evidence.all_submissions > 1:
-                    break
-                if evidence.result is not None:
-                    return evidence.result
-                if page.is_closed():
-                    break
-                if not confirmed and not evidence.all_submissions:
-                    modal = page.locator(modal_selector).filter(has_text=re.compile(r"确认发布|确定发布|是否.{0,30}发布")).first
-                    if await _visible(modal):
-                        confirmation = modal.get_by_role("button", name=re.compile(r"^(?:确认发布|确认|确定|继续发布)$")).first
-                        if await _visible(confirmation):
-                            confirmed = True
-                            await confirmation.click(timeout=15_000)
-                await asyncio.sleep(0.2)
-    except Exception:
-        pass
-    return ProviderResult("unknown", "快手投稿未收到本次请求的明确确认，请到创作中心核对；不要直接重复投稿", url=MANAGE_URL)
+    identity = evidence.identity
+    ctx.awaiting_user(message or "快手视频和资料已准备好，请检查页面并手动点击发布；如有确认弹窗，也请自行确认")
+    uncertain = False
+    while not page.is_closed():
+        if evidence.identity != identity:
+            evidence.ambiguous = True
+        if not evidence.ambiguous and evidence.all_submissions == 1 and evidence.result is not None:
+            return evidence.result
+        if (evidence.ambiguous or evidence.all_submissions > 1) and not uncertain:
+            ctx.progress("快手本次发布结果暂无法确认，窗口会保持打开；请自行核对平台结果后关闭窗口，勿直接重复发布")
+            uncertain = True
+        await asyncio.sleep(0.2)
+    return ProviderResult("unknown", "快手窗口已关闭，未取得本次发布的明确回执；请到创作中心核对，勿直接重复投稿", url=MANAGE_URL)
 
 
 async def publish(payload: PublishPayload, ctx: ProviderContext) -> ProviderResult:
@@ -516,11 +498,24 @@ async def publish(payload: PublishPayload, ctx: ProviderContext) -> ProviderResu
                 await page.goto(UPLOAD_URL, wait_until="domcontentloaded", timeout=60_000)
             if not _creator_url(page.url):
                 raise LoginRequired("快手发布入口要求重新验证，请重新连接账号")
-            async with asyncio.timeout(UPLOAD_SECONDS + LOGIN_SECONDS + CONFIRM_SECONDS + 120):
-                button = await _prepare(page, payload, guarded, evidence)
-                if evidence.identity != identity:
-                    raise LoginRequired("快手登录状态在上传期间发生变化，尚未点击发布；请先核对平台草稿")
-                result = await _submit_once(page, button, evidence, payload, ctx)
+            handoff_message = None
+            try:
+                async with asyncio.timeout(UPLOAD_SECONDS + LOGIN_SECONDS + 120):
+                    await _prepare(page, payload, guarded, evidence)
+            except (KuaishouError, TimeoutError) as exc:
+                if not mutated or page.is_closed():
+                    raise
+                detail = str(exc) if isinstance(exc, KuaishouError) else "快手上传或填写等待超时"
+                handoff_message = detail + "；窗口保持打开，请检查并手动补全，最后自行点击发布"
+            except Exception:
+                if not mutated or page.is_closed():
+                    raise
+                handoff_message = "快手上传或资料填写未能自动完成；窗口保持打开，请检查并手动补全，最后自行点击发布"
+            if evidence.identity != identity:
+                raise LoginRequired("快手登录状态在上传期间发生变化，尚未点击发布；请先核对平台草稿")
+            # No operation deadline covers the user's decision. The supervised
+            # worker still closes its owned browser on cancellation or shutdown.
+            result = await _wait_for_manual_publish(page, evidence, payload, guarded, handoff_message)
             with suppress(Exception):
                 await _save_session(context, payload, ctx, identity)
             return result
