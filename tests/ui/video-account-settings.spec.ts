@@ -22,7 +22,7 @@ test("old video fields remain saved while account settings control new submissio
   await expect(page.getByText("本次使用账号管理中的视频设置，旧稿设置已保留。", { exact: true })).toBeVisible();
   for (const label of ["创作类型", "视频分区", "转载来源"]) await expect(page.getByLabel(label)).toHaveCount(0);
   await page.getByRole("button", { name: "检查发布内容", exact: true }).click();
-  await page.getByRole("button", { name: "发布到已开启账号", exact: true }).click();
+  await page.getByRole("button", { name: "创建发布任务", exact: true }).click();
   const result = await page.evaluate(() => { const fixture = (window as any).__fixture; return { content: fixture.state.contents[0], snapshot: fixture.snapshots[fixture.state.batches[0].id] }; });
   expect(result.content.platformOptions.bilibili).toEqual({ copyright: "2", tid: "102", source: "https://example.test/old-video-source" });
   expect(result.content.videoOptionsSource).toBe("account");
@@ -49,7 +49,7 @@ test("incomplete account preferences block publication and categories can be ref
   await navigate(page, "视频");
   await page.getByRole("textbox", { name: "视频标题" }).fill("暂时未保存的视频");
   await page.getByRole("button", { name: "检查发布内容", exact: true }).click();
-  await expect(page.getByRole("button", { name: "发布到已开启账号", exact: true })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "创建发布任务", exact: true })).toBeDisabled();
   await expect(page.locator(".video-workspace:visible .preflight-result")).toContainText("请到账号管理设置创作类型");
   await navigate(page, "账号管理");
   await expect(page.getByRole("button", { name: "设置 品牌公众号 视频发布设置", exact: true })).toHaveCount(0);
@@ -67,7 +67,7 @@ test("incomplete account preferences block publication and categories can be ref
   await navigate(page, "视频");
   await expect(page.getByRole("textbox", { name: "视频标题" })).toHaveValue("暂时未保存的视频");
   await page.getByRole("button", { name: "检查发布内容", exact: true }).click();
-  await expect(page.getByRole("button", { name: "发布到已开启账号", exact: true })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "创建发布任务", exact: true })).toBeDisabled();
   await navigate(page, "账号管理");
   await page.getByRole("button", { name: "设置 品牌哔哩哔哩 视频发布设置", exact: true }).click();
   await expect(dialog.getByLabel("视频分区")).toHaveValue("102");
@@ -76,6 +76,6 @@ test("incomplete account preferences block publication and categories can be ref
   await dialog.getByRole("button", { name: "保存视频设置", exact: true }).click();
   await navigate(page, "视频");
   await page.getByRole("button", { name: "检查发布内容", exact: true }).click();
-  await expect(page.getByRole("button", { name: "发布到已开启账号", exact: true })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "创建发布任务", exact: true })).toBeEnabled();
   expect(await page.evaluate(() => (window as any).__fixture.state.batches)).toHaveLength(0);
 });

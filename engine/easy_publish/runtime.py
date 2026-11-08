@@ -15,12 +15,14 @@ import tempfile
 
 from .vault import Vault
 from .catalog import bilibili_categories
+from .providers.base import BROWSER_PUBLISH_PLATFORMS
 from . import __version__
 
 
 RESULT_STATUSES = {"ready", "login_required", "draft_created", "submitted", "published", "needs_attention", "failed", "unknown"}
 SUCCESSES = {"ready", "draft_created", "submitted", "published"}
 OPERATION_TIMEOUTS = {"login": 12 * 60, "check": 3 * 60, "publish": 35 * 60}
+WORKER_EXIT_SECONDS = 10
 MAX_SESSION_BYTES = 16 * 1024 * 1024
 
 
@@ -229,10 +231,12 @@ class Runtime:
             request = {"operation": operation, "payload": request_payload, "workspace": str(workspace), "session_path": str(session), "browser_path": self.browser_path, "parent_pid": os.getpid(), "worker_group_id": process.pid if os.name != "nt" else None}
             process.stdin.write((json.dumps(request, ensure_ascii=False) + "\n").encode("utf-8"))
             await process.stdin.drain()
-            async with asyncio.timeout(OPERATION_TIMEOUTS[operation]):
+            async with asyncio.timeout(OPERATION_TIMEOUTS[operation]) as deadline:
                 while line := await process.stdout.readline():
                     event = json.loads(line)
                     name = event.get("event")
+                    if result is not None:
+                        raise ValueError("Worker emitted after its result")
                     if name == "submitting":
                         # Once this event arrives, any interruption is treated
                         # conservatively; no ACK is sent before durable commit.
@@ -240,11 +244,21 @@ class Runtime:
                         await on_event({"event": "submitting", "message": str(event.get("message", "正在向平台提交"))[:4000]})
                         process.stdin.write(b'{"ack":"submitting"}\n')
                         await process.stdin.drain()
+                    elif name == "awaiting_user":
+                        if not submitted or operation != "publish" or payload.get("platform_id") not in BROWSER_PUBLISH_PLATFORMS:
+                            raise ValueError("Unexpected manual publication handoff")
+                        await on_event({"event": "awaiting_user", "message": str(event.get("message", "请在网页中手动发布"))[:4000]})
+                        # The user decides when to publish. Keep the supervised
+                        # process and private workspace alive until then.
+                        deadline.reschedule(None)
+                        process.stdin.write(b'{"ack":"awaiting_user"}\n')
+                        await process.stdin.drain()
                     elif name == "progress":
                         await on_event({"event": "progress", "message": str(event.get("message", ""))[:4000]})
                     elif name == "result":
                         if result is not None or event.get("status") not in RESULT_STATUSES:
                             raise ValueError("Invalid worker result")
+                        deadline.reschedule(asyncio.get_running_loop().time() + WORKER_EXIT_SECONDS)
                         result = {key: event.get(key) for key in ("status", "message", "remote_id", "url")}
                         result["message"] = str(result.get("message", ""))[:4000]
                         if payload.get("platform_id") == "bilibili" and operation in {"login", "check"} and result["status"] == "ready":

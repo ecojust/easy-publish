@@ -289,6 +289,7 @@ class DayuArticle:
             except Exception as exc:
                 result["error"] = str(exc)
                 dayu_logger.error(f"大鱼号图文阶段={result['status']}，结果文件={result_file}: {exc}")
+                await runtime.keep_manual_window(page)
                 if self.debug and page is not None:
                     await page.screenshot(path=str(result_file.with_suffix(".png")))
                 raise

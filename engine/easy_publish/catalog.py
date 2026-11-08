@@ -29,6 +29,7 @@ def select_field(key, label, values, required=True):
 
 def platform(id, name, color, kind, modes, title_limit, description, url, fields=None):
     return {"id": id, "name": name, "color": color, "kinds": [kind], "modes": modes,
+            "publishMethod": "api" if id in {"wechat", "bilibili"} else "browser",
             "auth": "wechat_api" if id == "wechat" else "browser", "titleLimit": title_limit,
             "description": description, "homeUrl": url, "fields": fields or []}
 

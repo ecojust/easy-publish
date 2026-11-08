@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from easy_publish.providers.base import ProviderContext, PublishPayload
+from easy_publish.providers.base import ProviderContext, ProviderResult, PublishPayload
 from easy_publish.providers import social_video as video
 
 
@@ -109,7 +109,7 @@ async def test_page_read_failure_does_not_expose_raw_error():
 @pytest.mark.asyncio
 @pytest.mark.parametrize("after_fence", [False, True])
 async def test_stage_error_preserves_mutation_state_without_resubmit(account, monkeypatch, after_fence):
-    ctx, payload, _ = account
+    ctx, payload, events = account
     page = fake_page()
     page.goto = AsyncMock()
 
@@ -127,9 +127,16 @@ async def test_stage_error_preserves_mutation_state_without_resubmit(account, mo
     monkeypatch.setattr(video, "_wait_login", AsyncMock(return_value=page))
     monkeypatch.setattr(video, "_prepare", prepare)
     monkeypatch.setattr(video, "_submit_once", submit)
+    manual = AsyncMock(return_value=ProviderResult("unknown", "用户关闭窗口"))
+    monkeypatch.setattr(video, "_wait_for_manual_publish", manual)
     result = await video.publish(payload, ctx)
     assert result.status == ("unknown" if after_fence else "needs_attention")
-    assert "上传失败" in result.message
+    if after_fence:
+        manual.assert_awaited_once()
+        assert "上传失败" in manual.call_args.args[-1]
+    else:
+        assert "上传失败" in result.message
+        manual.assert_not_awaited()
     submit.assert_not_awaited()
 
 
@@ -276,6 +283,13 @@ async def test_real_browser_slow_upload_keeps_window_open_until_current_preview(
                 name.textContent = document.querySelector('input[type=file]').files[0].name;
                 status.append(name);
             }""")
+            async with asyncio.timeout(10):
+                while not any(event["event"] == "awaiting_user" for event in events):
+                    await asyncio.sleep(0.05)
+            await asyncio.sleep(0.3)
+            assert not task.done() and not closed and not submissions and cover_completed
+            # This is a user click supplied by the fixture, not the adapter.
+            await page.get_by_role("button", name="发布", exact=True).click()
             result = await asyncio.wait_for(task, timeout=10)
             assert result.status == "submitted"
             assert closed and cover_completed

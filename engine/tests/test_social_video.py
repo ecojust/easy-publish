@@ -1,4 +1,5 @@
 """Isolated browser-boundary fixtures; no platform accounts or network calls."""
+import asyncio
 from contextlib import asynccontextmanager
 from pathlib import Path
 import tempfile
@@ -28,6 +29,7 @@ class VideoAdapterTests(unittest.IsolatedAsyncioTestCase):
         context.storage_state = AsyncMock()
         page = MagicMock()
         page.goto = AsyncMock()
+        page.is_closed.return_value = False
 
         @asynccontextmanager
         async def factory(ctx, **kwargs):
@@ -71,31 +73,66 @@ class VideoAdapterTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIn("未接入", result.message)
         browser.assert_not_called()
 
-    async def test_timed_out_click_never_retries(self):
-        button = MagicMock()
-        button.click = AsyncMock(side_effect=TimeoutError("response lost"))
-        with patch.object(video, "_wait_enabled", AsyncMock()), patch.object(video, "_confirm_receipt", AsyncMock()) as receipt:
-            result = await video._submit_once(MagicMock(), button, "douyin", self.payload, self.ctx)
+    async def test_closed_manual_window_never_clicks_or_claims_success(self):
+        button = MagicMock(click=AsyncMock())
+        page = MagicMock()
+        page.is_closed.return_value = True
+        result = await video._submit_once(page, button, "douyin", self.payload, self.ctx)
         self.assertEqual(result.status, "unknown")
-        button.click.assert_awaited_once()
-        receipt.assert_not_awaited()
+        button.click.assert_not_awaited()
+        self.assertEqual(self.events[-1]["event"], "awaiting_user")
 
-    async def test_missing_receipt_never_retries_or_claims_success(self):
-        button = MagicMock()
-        button.click = AsyncMock()
-        with patch.object(video, "_wait_enabled", AsyncMock()), patch.object(video, "_confirm_receipt", AsyncMock(side_effect=TimeoutError())):
-            result = await video._submit_once(MagicMock(), button, "douyin", self.payload, self.ctx)
-        self.assertEqual(result.status, "unknown")
-        button.click.assert_awaited_once()
+    async def test_manual_review_has_no_short_timeout_and_is_cancellable(self):
+        button = MagicMock(click=AsyncMock())
+        page = MagicMock()
+        page.is_closed.return_value = False
+        with patch.object(video, "CONFIRM_SECONDS", 0.001), patch.object(video, "_manual_receipt", AsyncMock(return_value=None)):
+            task = asyncio.create_task(video._submit_once(page, button, "douyin", self.payload, self.ctx))
+            await asyncio.sleep(0.03)
+            self.assertFalse(task.done())
+            button.click.assert_not_awaited()
+            task.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await task
 
-    async def test_confirmed_receipt_is_submitted_not_published(self):
-        button = MagicMock()
-        button.click = AsyncMock()
+    async def test_manual_confirmed_receipt_is_submitted_without_a_click(self):
+        button = MagicMock(click=AsyncMock())
+        page = MagicMock()
+        page.is_closed.return_value = False
         expected = ProviderResult("submitted", "platform accepted")
-        with patch.object(video, "_wait_enabled", AsyncMock()), patch.object(video, "_confirm_receipt", AsyncMock(return_value=expected)):
-            result = await video._submit_once(MagicMock(), button, "douyin", self.payload, self.ctx)
+        with patch.object(video, "_manual_receipt", AsyncMock(return_value=expected)):
+            result = await video._submit_once(page, button, "douyin", self.payload, self.ctx)
         self.assertIs(result, expected)
-        button.click.assert_awaited_once()
+        button.click.assert_not_awaited()
+        self.assertEqual(self.events[-1]["event"], "awaiting_user")
+
+    async def test_preexisting_success_notice_cannot_confirm_manual_publication(self):
+        page = MagicMock()
+        page.is_closed.return_value = False
+        receipt = AsyncMock(return_value=ProviderResult("submitted", "old success"))
+        with patch.object(video, "_manual_success_notice", AsyncMock(return_value=True)), patch.object(video, "_manual_receipt", receipt):
+            task = asyncio.create_task(video._wait_for_manual_publish(page, "douyin", self.payload, self.ctx))
+            await asyncio.sleep(0.03)
+            self.assertFalse(task.done())
+            receipt.assert_not_awaited()
+            page.is_closed.return_value = True
+            result = await asyncio.wait_for(task, 1)
+        self.assertEqual(result.status, "unknown")
+
+    async def test_manual_receipts_require_trusted_success_path_and_notice(self):
+        success_paths = {"douyin": "/creator-micro/content/manage", "xiaohongshu": "/publish/success", "channels": "/platform/post/list"}
+        for platform, path in success_paths.items():
+            page = MagicMock(url=f"https://{video.SITES[platform].host}{path}")
+            with patch.object(video, "_manual_success_notice", AsyncMock(return_value=False)):
+                self.assertIsNone(await video._manual_receipt(page, platform, self.payload))
+            with patch.object(video, "_manual_success_notice", AsyncMock(return_value=True)):
+                self.assertEqual((await video._manual_receipt(page, platform, self.payload)).status, "submitted")
+                for url in (f"https://{video.SITES[platform].host}.attacker.invalid{path}",
+                            f"http://{video.SITES[platform].host}{path}",
+                            f"https://{video.SITES[platform].host}:444{path}",
+                            f"https://{video.SITES[platform].host}/login"):
+                    page.url = url
+                    self.assertIsNone(await video._manual_receipt(page, platform, self.payload))
 
     async def test_upload_fence_precedes_first_media_mutation(self):
         upload = MagicMock()
@@ -121,10 +158,11 @@ class VideoAdapterTests(unittest.IsolatedAsyncioTestCase):
             ctx.submitting()
             raise RuntimeError("fixture: remote upload may already exist")
 
-        with patch.object(video, "_browser_page", factory), patch.object(video, "_wait_login", AsyncMock(return_value=page)), patch.object(video, "_douyin_upload_page", AsyncMock()), patch.object(video, "_prepare", prepare), patch.object(video, "_submit_once", AsyncMock()) as submit:
+        with patch.object(video, "_browser_page", factory), patch.object(video, "_wait_login", AsyncMock(return_value=page)), patch.object(video, "_douyin_upload_page", AsyncMock()), patch.object(video, "_prepare", prepare), patch.object(video, "_submit_once", AsyncMock()) as submit, patch.object(video, "_wait_for_manual_publish", AsyncMock(return_value=ProviderResult("unknown", "window closed"))) as manual:
             result = await video.publish(self.payload, self.ctx)
         self.assertEqual(result.status, "unknown")
         submit.assert_not_awaited()
+        manual.assert_awaited_once()
 
     async def test_failure_before_upload_is_retryable(self):
         self.ctx.session_path.write_text("{}")

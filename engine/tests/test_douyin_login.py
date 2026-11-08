@@ -1,4 +1,5 @@
 """Offline regression for QR login landing on creator home, without an upload input."""
+import asyncio
 from contextlib import asynccontextmanager
 import json
 import os
@@ -246,8 +247,8 @@ async def test_upload_widget_failure_does_not_reclassify_connected_account(accou
 
 
 @pytest.mark.asyncio
-async def test_late_login_error_after_fence_stays_unknown(account, monkeypatch):
-    ctx, payload, _ = account
+async def test_late_login_error_hands_off_until_user_closes_then_stays_unknown(account, monkeypatch):
+    ctx, payload, events = account
     ctx.session_path.write_text("{}")
     payload.video_path = ctx.workspace / "video.mp4"
     payload.video_path.write_bytes(b"fixture only")
@@ -260,7 +261,29 @@ async def test_late_login_error_after_fence_stays_unknown(account, monkeypatch):
         raise video.LoginPageError("fixture expired after upload")
 
     monkeypatch.setattr(video, "_prepare", prepare)
-    assert (await video.publish(payload, ctx)).status == "unknown"
+    handoff = asyncio.Event()
+
+    def observe(event):
+        events.append(event)
+        if event["event"] == "awaiting_user":
+            handoff.set()
+
+    ctx.emit = observe
+    task = asyncio.create_task(video.publish(payload, ctx))
+    try:
+        await asyncio.wait_for(handoff.wait(), 2)
+        assert not task.done() and not page.closed
+        assert [event["event"] for event in events].count("submitting") == 1
+        assert "手动点击发布" in events[-1]["message"]
+        assert "fixture expired after upload" not in events[-1]["message"]
+        # The adapter keeps the uploaded page alive for manual recovery. The
+        # fixture must now model the user's close, rather than await an auto-exit.
+        page.closed = True
+        assert (await asyncio.wait_for(task, 2)).status == "unknown"
+    finally:
+        if not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
 
 
 @pytest.mark.asyncio

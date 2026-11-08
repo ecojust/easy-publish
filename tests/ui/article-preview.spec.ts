@@ -30,7 +30,7 @@ test("account changes during preflight invalidate delayed results and refresh pr
   await page.getByRole("dialog", { name: "文章最终预览" }).getByRole("button", { name: "关闭", exact: true }).click();
   await page.evaluate(() => (window as any).__releasePreflight());
   await expect(page.getByRole("alert")).toContainText("内容或发布账号已变化");
-  await expect(page.getByRole("button", { name: "发布到已开启账号" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "创建发布任务" })).toBeDisabled();
   expect(await page.evaluate(() => (window as any).__fixture.calls.filter((call: any) => /\/format$/.test(call.path) || call.path === "/api/batches"))).toHaveLength(0);
 });
 
@@ -43,7 +43,7 @@ test("switching to an identical copied article invalidates the prior article pre
   });
   await page.goto("/");
   await page.getByRole("button", { name: "检查发布内容" }).click();
-  const publish = page.getByRole("button", { name: "发布到已开启账号" });
+  const publish = page.getByRole("button", { name: "创建发布任务" });
   await expect(publish).toBeEnabled();
   await page.locator('.article-library .draft-item').nth(1).click();
   await expect(publish).toBeDisabled();
@@ -68,7 +68,7 @@ test("account changes wait for a fresh state after an older poll before returnin
   await page.goto("/");
   await page.getByLabel("信息来源").selectOption("无需标注");
   await page.getByRole("button", { name: "检查发布内容" }).click();
-  await expect(page.getByRole("button", { name: "发布到已开启账号" })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "创建发布任务" })).toBeEnabled();
   await page.getByRole("navigation").getByRole("button", { name: "账号管理", exact: true }).click();
   await page.evaluate(() => { (window as any).__deferNextState = true; });
   await expect.poll(() => page.evaluate(() => !!(window as any).__releaseState)).toBe(true);
@@ -79,7 +79,7 @@ test("account changes wait for a fresh state after an older poll before returnin
   await expect(toggle).not.toBeChecked();
   await page.getByRole("navigation").getByRole("button", { name: "文章", exact: true }).click();
   await expect(page.getByRole("tab", { name: /品牌公众号/ })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "发布到已开启账号" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "创建发布任务" })).toBeDisabled();
   expect(await page.evaluate(() => (window as any).__fixture.state.batches)).toHaveLength(0);
 });
 
@@ -159,7 +159,7 @@ test("new Markdown articles preview immediately without saving or generating and
   expect(before.filter((call: any) => call.method !== "GET" && call.path !== "/api/preview/article")).toHaveLength(0);
   await page.getByLabel("信息来源").selectOption("无需标注");
   await page.getByRole("button", { name: "检查发布内容" }).click();
-  await expect(page.getByRole("button", { name: "发布到已开启账号" })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "创建发布任务" })).toBeEnabled();
   const after = await page.evaluate(() => (window as any).__fixture.calls);
   const saved = after.find((call: any) => call.method === "POST" && call.path === "/api/contents");
   expect(saved.body).toMatchObject({ inputFormat: "markdown", body: markdown, sourceText: "" });

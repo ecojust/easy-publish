@@ -3,7 +3,7 @@
   const clone = (value) => structuredClone(value);
   const date = "2026-11-06T10:00:00Z";
   const png = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aWQAAAABJRU5ErkJggg==";
-  const platform = (id, name, color, kinds, modes, extra = {}) => ({ id, name, color, kinds, modes, auth: "browser", titleLimit: 100, description: `${name}浏览器发布连接（测试替身）`, homeUrl: `https://${id}.example.test/creator`, fields: [], ...extra });
+  const platform = (id, name, color, kinds, modes, extra = {}) => ({ id, name, color, kinds, modes, auth: "browser", publishMethod: ["wechat", "bilibili"].includes(id) ? "api" : "browser", titleLimit: 100, description: `${name}浏览器发布连接（测试替身）`, homeUrl: `https://${id}.example.test/creator`, fields: [], ...extra });
   const platforms = [
     platform("wechat", "微信公众号", "#21b36b", ["article"], ["publish", "draft"], { auth: "wechat_api", description: "通过官方 API 创建文章草稿或提交发布（测试替身）" }),
     platform("zhihu", "知乎", "#2680e9", ["article"], ["publish"]),
@@ -43,7 +43,7 @@
     accounts: [account("a-wechat", "wechat", "品牌公众号"), account("a-zhihu", "zhihu", "创作笔记"), account("a-dayu", "dayu", "创作工作室"), account("a-douyin", "douyin", "品牌抖音"), account("a-kuaishou", "kuaishou", "品牌快手"), account("a-xhs", "xiaohongshu", "品牌小红书"), account("a-channels", "channels", "品牌视频号", "login_required"), account("a-bilibili", "bilibili", "品牌哔哩哔哩")],
     contents: [draft("c-article", "article", "把创作的时间，还给创作", "## 少一点重复，多一点表达\n\n每一篇好内容，都值得被更多人看见。\n\n当文章写完、视频剪好，接下来的分享应该简单一些。\n\n### 这一次，专注内容本身\n\n- 在一个工作空间整理素材\n- 为不同平台选择合适的账号\n- 清楚了解每个目标的发布进度\n\n**一份创作，更多可能。**"), draft("c-article-2", "article", "从灵感到第一篇文章", "写下你的第一个想法。")],
     batches: [],
-    runtime: { browserReady: true, browserInstalling: false, browserMessage: "测试浏览器已就绪", vaultReady: true, vaultMessage: "测试凭据库已就绪", version: "0.1.9" },
+    runtime: { browserReady: true, browserInstalling: false, browserMessage: "测试浏览器已就绪", vaultReady: true, vaultMessage: "测试凭据库已就绪", version: "0.1.10" },
   };
   // Initial ready account represents previously configured preferences; new accounts start unset.
   state.accounts.find((item) => item.id === "a-bilibili").videoOptions = { copyright: "1", tid: "101" };
@@ -86,7 +86,7 @@
       finishLogin(entry);
     },
     seedTasks: () => {
-      const statuses = ["queued", "running", "submitting", "draft_created", "submitted", "published", "needs_attention", "failed", "cancelled", "unknown"];
+      const statuses = ["queued", "running", "submitting", "awaiting_user", "draft_created", "submitted", "published", "needs_attention", "failed", "cancelled", "unknown"];
       state.batches = [{ id: "b-statuses", contentId: "c-article", title: "各目标回执状态测试", kind: "article", mode: "publish", createdAt: date, tasks: statuses.map((status) => ({ id: `t-${status}`, accountId: "a-zhihu", accountLabel: `测试 ${status}`, platformId: "zhihu", status, message: "页面状态验证替身", remoteId: null, url: null, canRetry: status === "failed" || status === "cancelled", startedAt: null, finishedAt: null })) }];
     },
   };
@@ -163,7 +163,7 @@
       }
       if (method === "POST" && path.startsWith("/api/batches/") && path.endsWith("/cancel")) {
         const batch = state.batches.find((entry) => entry.id === path.split("/")[3]);
-        for (const task of batch.tasks) if (["queued", "running", "submitting"].includes(task.status)) { task.status = task.status === "submitting" ? "unknown" : "cancelled"; task.canRetry = task.status === "cancelled"; }
+        for (const task of batch.tasks) if (["queued", "running", "submitting", "awaiting_user"].includes(task.status)) { task.status = ["submitting", "awaiting_user"].includes(task.status) ? "unknown" : "cancelled"; task.canRetry = task.status === "cancelled"; }
         return { ok: true };
       }
       if (method === "POST" && path.endsWith("/retry")) {

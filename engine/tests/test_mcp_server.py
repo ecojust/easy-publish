@@ -125,6 +125,38 @@ def test_publish_defaults_match_kind_and_uuid_replay_does_not_repost(mcp_api):
     assert len(runtime.publish_calls) == 2
 
 
+def test_mcp_browser_handoff_stays_active_and_replay_does_not_submit_again(mcp_api):
+    client, runtime, _ = mcp_api
+    ready_account(client, "zhihu")
+    platforms = result_value(call(client, "list_platforms"))["platforms"]
+    methods = {p["id"]: p["publishMethod"] for p in platforms}
+    assert {key for key, value in methods.items() if value == "api"} == {"wechat", "bilibili"}
+    content = create_content(client)
+
+    async def handoff(payload, on_event, job_id):
+        await on_event({"event": "submitting", "message": "fixture upload"})
+        await on_event({"event": "awaiting_user", "message": "fixture waits for a person"})
+        runtime.started.set()
+        while not runtime.release.is_set():
+            await asyncio.sleep(0.01)
+        return {"status": "unknown", "message": "fixture window closed without receipt"}
+
+    runtime.publish_hook = handoff
+    arguments = {"contentId": content["id"], "requestId": str(uuid4())}
+    first = result_value(call(client, "publish", arguments))["batch"]
+    assert runtime.started.wait(3)
+    active = result_value(call(client, "get_batch", {"batchId": first["id"]}))["batch"]
+    assert active["tasks"][0]["status"] == "awaiting_user"
+    assert active["tasks"][0]["canRetry"] is False
+    replay = result_value(call(client, "publish", arguments))
+    assert replay["reused"] and replay["batch"]["id"] == first["id"]
+    assert len(runtime.publish_calls) == 1
+    assert result_value(call(client, "cancel_batch", {"batchId": first["id"]}))["ok"]
+    final = completed_batch(client, first["id"])
+    assert final["tasks"][0]["status"] == "unknown"
+    assert final["tasks"][0]["canRetry"] is False
+
+
 @pytest.mark.parametrize("kind,platform,other_platform", [("article", "zhihu", "douyin"), ("video", "douyin", "zhihu")])
 def test_account_preferences_limit_automatic_selection_but_not_explicit_targets(mcp_api, tmp_path, kind, platform, other_platform):
     client, runtime, _ = mcp_api

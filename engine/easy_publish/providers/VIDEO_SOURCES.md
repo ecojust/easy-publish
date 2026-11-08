@@ -99,3 +99,8 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+
+## 0.1.10 · 网页最终提交由用户操作
+
+2026-11-08 根据用户要求，抖音、小红书、视频号的 publish 模式只上传和填写，随后发出 awaiting_user 并保持当前受监管浏览器，最终发布及后续确认不再由自动化点击。此变更替代上文历史版本中“提交一次”的行为；视频号 draft 模式保持原有保存草稿能力。等待用户阶段不受原确认／总发布时限限制，取消或应用退出仍清理窗口。只有可靠平台回执可更新为 submitted；关闭窗口且无回执为 unknown。填写过程中可交接的页面问题通过明确提示交给用户继续处理，不把编辑器就绪报告为发布成功。

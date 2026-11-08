@@ -221,7 +221,7 @@ async def publish(payload: PublishPayload, ctx: ProviderContext) -> ProviderResu
             ctx.submitting("正在进入平台编辑器；平台可能自动保存草稿")
             mutated = True
 
-    runtime.configure(ctx.browser_path, before_mutation)
+    runtime.configure(ctx.browser_path, before_mutation, ctx.awaiting_user)
     path = None
     try:
         _validate_options(payload)

@@ -122,7 +122,7 @@ test("history requires explicit article repeats and only relevant account change
   await expect(repeatTarget(page, "创作笔记")).toBeVisible();
   await page.getByLabel("信息来源").selectOption("无需标注");
   await page.getByRole("button", { name: "检查发布内容", exact: true }).click();
-  const publish = page.getByRole("button", { name: "发布到已开启账号", exact: true });
+  const publish = page.getByRole("button", { name: "创建发布任务", exact: true });
   await expect(publish).toBeEnabled();
   await navigate(page, "账号管理");
   await page.getByRole("switch", { name: "品牌抖音 发布时默认选中", exact: true }).uncheck();
@@ -209,7 +209,7 @@ for (const change of ["account", "categories", "video preferences"] as const) {
     await expect(page.locator(".video-workspace:visible").getByLabel("视频分区")).toHaveCount(0);
     await page.evaluate(() => (window as any).__releasePreflight());
     await expect(page.getByRole("button", { name: "检查发布内容", exact: true })).toBeEnabled();
-    await expect(page.getByRole("button", { name: "发布到已开启账号", exact: true })).toBeDisabled();
+    await expect(page.getByRole("button", { name: "创建发布任务", exact: true })).toBeDisabled();
     await expect(page.getByText("发布前检查通过", { exact: true })).toHaveCount(0);
     expect(await page.evaluate(() => (window as any).__fixture.state.batches)).toHaveLength(0);
   });
@@ -239,7 +239,7 @@ test("video repeat consent resets when an account is disabled and an identical c
   await expect(target(page, "品牌抖音")).toHaveCount(0);
   await repeat.click();
   await page.getByRole("button", { name: "检查发布内容", exact: true }).click();
-  const publish = page.getByRole("button", { name: "发布到已开启账号", exact: true });
+  const publish = page.getByRole("button", { name: "创建发布任务", exact: true });
   await expect(publish).toBeEnabled();
   await page.locator(".draft-item:visible").nth(1).click();
   await expect(publish).toBeDisabled();

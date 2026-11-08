@@ -3,7 +3,7 @@
   <h1>Easy Publish</h1>
 </div>
 
-Easy Publish 是把一篇文章或一个视频发布到多个平台的本地桌面工作台。文章与视频分开管理，账号统一配置；直接编写 Markdown，用 Wenyan CLI 生成模板预览后发布。也可通过 MCP，让 Agent 使用已连接的账号发布内容并查询结果。
+Easy Publish 是把一篇文章或一个视频发布到多个平台的本地桌面工作台。文章与视频分开管理，账号统一配置；直接编写 Markdown，用 Wenyan CLI 生成模板预览。网页平台由应用上传和填写，再由你点击发布；也可通过 MCP，让 Agent 创建任务并查询结果。
 
 [![GitHub release](https://img.shields.io/github/v/release/ecojust/easy-publish?style=flat-square&label=release&color=0f766e&sort=date)](https://github.com/ecojust/easy-publish/releases/latest)
 [![GitHub Release 总下载量](https://img.shields.io/github/downloads/ecojust/easy-publish/total?style=flat-square&label=downloads&color=16a34a)](https://github.com/ecojust/easy-publish/releases)
@@ -14,7 +14,7 @@ Easy Publish 是把一篇文章或一个视频发布到多个平台的本地桌�
 [![MCP tools](https://img.shields.io/badge/MCP-12%20tools-5c4ee5?style=flat-square)](docs/mcp.md)
 [![MIT license](https://img.shields.io/badge/license-MIT-f4c430?style=flat-square)](LICENSE)
 
-[下载 Easy Publish 0.1.9](https://github.com/ecojust/easy-publish/releases/tag/v0.1.9) · macOS 13.5+（Apple Silicon / Intel）/ Windows 10+ x64
+[下载 Easy Publish 0.1.10](https://github.com/ecojust/easy-publish/releases/tag/v0.1.10) · macOS 13.5+（Apple Silicon / Intel）/ Windows 10+ x64
 
 [使用指南](#使用流程) · [文章模板](docs/article-templates.md) · [MCP / Agent 接入](docs/mcp.md) · [反馈问题](https://github.com/ecojust/easy-publish/issues)
 
@@ -24,7 +24,7 @@ Easy Publish 是把一篇文章或一个视频发布到多个平台的本地桌�
 
 ## 平台能力
 
-下表对应应用实际展示的平台目录。这里的“发布”表示执行平台提交流程；任务会进一步区分已受理、已确认发布和结果未知。
+下表对应应用实际展示的平台目录。知乎、大鱼号、雪球、抖音、快手、小红书、视频号完成上传填写后，需用户在已打开的发布浏览器中点击“发布”和后续确认按钮。微信公众号与 B 站通过接口直接提交。任务进一步区分等待手动发布、已受理、已确认发布和结果未知。
 
 | 分类 | 平台 | 当前操作 | 主要要求 |
 | --- | --- | --- | --- |
@@ -42,13 +42,13 @@ Easy Publish 是把一篇文章或一个视频发布到多个平台的本地桌�
 
 ## 安装与下载
 
-从 [Release 页面](https://github.com/ecojust/easy-publish/releases/tag/v0.1.9) 下载对应安装包：
+从 [Release 页面](https://github.com/ecojust/easy-publish/releases/tag/v0.1.10) 下载对应安装包：
 
 | 系统 | 下载 |
 | --- | --- |
-| macOS Apple Silicon（M1–M5） | [ARM DMG](https://github.com/ecojust/easy-publish/releases/download/v0.1.9/Easy-Publish_0.1.9_macos-arm64.dmg) |
-| macOS Intel | [Intel DMG](https://github.com/ecojust/easy-publish/releases/download/v0.1.9/Easy-Publish_0.1.9_macos-x64.dmg) |
-| Windows x64 | [安装程序](https://github.com/ecojust/easy-publish/releases/download/v0.1.9/Easy-Publish_0.1.9_windows-x64-setup.exe) |
+| macOS Apple Silicon（M1–M5） | [ARM DMG](https://github.com/ecojust/easy-publish/releases/download/v0.1.10/Easy-Publish_0.1.10_macos-arm64.dmg) |
+| macOS Intel | [Intel DMG](https://github.com/ecojust/easy-publish/releases/download/v0.1.10/Easy-Publish_0.1.10_macos-x64.dmg) |
+| Windows x64 | [安装程序](https://github.com/ecojust/easy-publish/releases/download/v0.1.10/Easy-Publish_0.1.10_windows-x64-setup.exe) |
 
 升级前完全退出旧版。macOS 打开 DMG，将应用拖入“应用程序”；Windows 运行安装程序。Release 同时提供 `SHA256SUMS.txt`。后续开发构建仍可从成功的 [Actions 运行](https://github.com/ecojust/easy-publish/actions/workflows/build.yml) 下载 artifact 并解压 ZIP，Actions 下载通常需要登录 GitHub。
 
@@ -62,7 +62,7 @@ macOS 请使用 0.1.1 或之后的构建。0.1.0 在部分 Mac 上会因启动�
 2. 在“账号管理”添加账号并连接，通过“发布时默认选中”开关设置常用账号；公众号在这里选择自己的文章模板；B 站在“视频发布设置”中填写创作类型、分区及转载来源。抖音、小红书和视频号优先检查应用已保存的会话，需要重新登录时才打开独立浏览器；公众号填写开发者凭据后检查连接。连接期间可点击“取消连接”，等待浏览器清理后重试。
 3. 文章页上方填写标题、作者、封面等资料，在正文输入框直接编写 Markdown，也可导入 Markdown 文件。点击右上角“预览”，内置 Wenyan CLI 在本地生成最终排版，按账号查看平台效果。视频页支持导入 MP4、MOV、M4V、WebM，填写标题、描述、话题及封面。
 4. 文章和视频自动使用账号管理中已开启且连接就绪的兼容账号，无需在发布页再次勾选。选择“发布内容”或“平台草稿”，检查预览及内容要求后创建任务。文章的来源等字段在文章页填写，视频的平台设置统一从账号管理读取。
-5. 在“发布任务”查看每个账号的进度与结果。任务保存创建时的内容快照，后续修改本地稿件不会改变已创建的任务。
+5. 网页平台显示“等待手动发布”时，切回已打开的发布浏览器，核对内容后自行点击发布和确认。等待期间窗口保持打开；平台返回可靠回执后才更新结果。任务保存创建时的内容快照，后续修改本地稿件不会改变已创建的任务。
 
 文章和视频的发布目标均跟随账号管理开关，并按连接状态、内容类型及当前操作筛选；页面展示本次发布账号，无需重复勾选。新旧账号的开关初始均为开启。开关不会自动发布，后台刷新不会覆盖未保存内容。
 
@@ -76,6 +76,7 @@ macOS 请使用 0.1.1 或之后的构建。0.1.0 在部分 Mac 上会因启动�
 
 | 任务结果 | 含义 |
 | --- | --- |
+| 等待手动发布 | 上传填写阶段已交给用户，请在已打开的发布浏览器中核对并点击发布；任务仍在进行中 |
 | 已保存草稿 | 平台确认草稿存在，尚未正式发布 |
 | 已提交 | 平台已受理，最终公开状态仍需核对 |
 | 已发布 | 适配器获得平台发布确认 |
@@ -84,9 +85,11 @@ macOS 请使用 0.1.1 或之后的构建。0.1.0 在部分 Mac 上会因启动�
 
 取消任务不会撤回已经产生的平台内容。应用不会自动重试结果未知的任务；只有明确尚未提交的失败或取消任务才提供重试。
 
+等待手动操作时不会因原发布时限到期而自动关闭窗口；取消任务、关闭发布窗口或退出应用会结束等待。没有可靠回执时显示“结果待确认”。队列逐个准备目标，已有目标等待用户时可继续准备其他账号，最多保持三个活动发布任务；同一账号依次执行。
+
 小红书视频会先等待上传与转码完成，再填写标题、正文、话题和封面；传输达到 100% 仍可能处于处理中。发布任务会显示上传进度和具体失败阶段，上传期间请保持窗口打开。
 
-视频号会在上传／处理期间持续跟踪内部编辑页面，页面重载后重新定位并核对正文，避免停在 98% 时因旧控件失效而结束任务。封面在上传就绪后设置，最终只提交一次；平台验证或弹窗仍需要在发布窗口中处理。
+视频号会在上传／处理期间持续跟踪内部编辑页面，页面重载后重新定位并核对正文，避免停在 98% 时因旧控件失效而结束任务。封面在上传就绪后设置，最终发表及确认由用户操作；保存平台草稿仍使用已有草稿流程。
 
 ## 文章模板与平台排版
 
@@ -106,7 +109,7 @@ macOS 请使用 0.1.1 或之后的构建。0.1.0 在部分 Mac 上会因启动�
 
 Agent 可以导入本地素材、保存文章／视频、预览、预检并发布，也可以查询每个账号的结果。Agent 写好的 Markdown 可直接保存，公众号沿用账号管理中的模板。文章只允许选择文章账号，视频只允许选择视频账号；默认只选择开启“发布时默认选中”、已连接且尚未向其平台提交过的兼容账号。明确指定账号可覆盖默认偏好并再次发布，新发布使用新的 `requestId`，重试同一次工具请求复用原 `requestId`。
 
-MCP 配置不含账号凭据或会话，发布工具通过同一个桌面队列执行；收到“已提交”不代表审核通过，结果不明不会自动重发。工具参数和使用示例见 [MCP 接入说明](docs/mcp.md)。
+MCP 配置不含账号凭据或会话，发布工具通过同一个桌面队列执行。网页平台同样会停在 `awaiting_user`，需要用户点击最后发布，Agent 不应自动代点。收到“已提交”不代表审核通过，结果不明不会自动重发。工具参数和使用示例见 [MCP 接入说明](docs/mcp.md)。
 
 ## 微信公众号配置
 

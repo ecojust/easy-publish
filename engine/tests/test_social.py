@@ -108,7 +108,7 @@ def test_dayu_accepts_decodable_image(tmp_path):
 
 
 @pytest.mark.parametrize("confirm", [True, False])
-def test_real_zhihu_main_signals_before_editor_and_clicks_once(tmp_path, monkeypatch, confirm):
+def test_real_zhihu_main_waits_for_owner_without_clicking_publish(tmp_path, monkeypatch, confirm):
     """Exercise vendored orchestration with an offline browser fixture."""
     from easy_publish.vendor.social_auto_upload.uploader.zhihu_uploader import article
 
@@ -117,6 +117,16 @@ def test_real_zhihu_main_signals_before_editor_and_clicks_once(tmp_path, monkeyp
     identity = {"name": "Fixture", "avatar_path": "/avatar.png"}
     clicks = []
     launches = []
+    closed = []
+    release = asyncio.Event()
+    handed_off = asyncio.Event()
+
+    def emit(event):
+        events.append(event)
+        if event["event"] == "awaiting_user":
+            handed_off.set()
+
+    ctx.emit = emit
 
     class Locator:
         async def click(self):
@@ -128,6 +138,10 @@ def test_real_zhihu_main_signals_before_editor_and_clicks_once(tmp_path, monkeyp
 
     class Page:
         url = "about:blank"
+        closed = False
+
+        def is_closed(self):
+            return self.closed
 
         async def goto(self, url, **kwargs):
             assert any(e["event"] == "submitting" for e in events)
@@ -138,8 +152,13 @@ def test_real_zhihu_main_signals_before_editor_and_clicks_once(tmp_path, monkeyp
             return Locator()
 
         async def wait_for_url(self, pattern, **kwargs):
+            assert kwargs["timeout"] == 0
+            assert any(e["event"] == "awaiting_user" for e in events)
+            await release.wait()
             if not confirm:
-                raise TimeoutError("fixture connection lost after one click")
+                self.closed = True
+                raise RuntimeError("owner closed the fixture page")
+            self.url = "https://zhuanlan.zhihu.com/p/123"
             assert pattern.fullmatch(self.url)
 
     page = Page()
@@ -154,7 +173,7 @@ def test_real_zhihu_main_signals_before_editor_and_clicks_once(tmp_path, monkeyp
             return BrowserContext()
 
         async def close(self):
-            pass
+            closed.append(True)
 
     class Chromium:
         async def launch(self, **kwargs):
@@ -185,8 +204,16 @@ def test_real_zhihu_main_signals_before_editor_and_clicks_once(tmp_path, monkeyp
     monkeypatch.setattr(article, "expect", lambda locator: Expect())
     monkeypatch.setattr(article, "read_zhihu_identity", read_identity)
     monkeypatch.setattr(article.ZhihuArticle, "fill_article_form", fill_article_form)
-    result = asyncio.run(social.publish(payload(), ctx))
-    assert clicks == ["publish"]
+    async def run():
+        task = asyncio.create_task(social.publish(payload(), ctx))
+        await asyncio.wait_for(handed_off.wait(), 1)
+        assert not task.done() and not closed and not clicks
+        release.set()  # Simulate the owner's submit or close, never automation.
+        return await asyncio.wait_for(task, 1)
+
+    result = asyncio.run(run())
+    assert clicks == []
+    assert closed == [True]
     assert [e["event"] for e in events].count("submitting") == 1
     assert launches[0]["executable_path"] == "/owned/chromium"
     assert launches[0]["channel"] == "chromium"

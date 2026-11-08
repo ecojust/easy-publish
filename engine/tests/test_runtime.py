@@ -119,6 +119,99 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(json.loads(self.runtime.vault.get("test-account", "session")), {"cookies": [], "origins": []})
         self.assertEqual(list((self.root / "work").iterdir()), [])
 
+    async def test_real_manual_handoff_waits_for_ack_and_outlives_preparation_timeout(self):
+        self.payload["platform_id"] = "zhihu"
+        entered, persisted = asyncio.Event(), asyncio.Event()
+        observed = []
+        script = """
+import asyncio, pathlib, sys, types
+from easy_publish.providers import base
+import easy_publish.providers as providers
+fake = types.ModuleType('easy_publish.providers.social')
+async def publish(payload, ctx):
+    ctx.submitting('fixture upload')
+    ctx.awaiting_user('fixture awaiting manual publication')
+    pathlib.Path(payload.options['marker']).write_text('handoff acknowledged')
+    await asyncio.sleep(1.2)
+    ctx.awaiting_user('fixture final confirmation is also manual')
+    return base.ProviderResult('submitted', 'fixture manual receipt')
+fake.publish = publish
+providers.social = fake
+sys.modules['easy_publish.providers.social'] = fake
+from easy_publish.worker import worker_main
+sys.exit(worker_main())
+"""
+
+        async def on_event(event):
+            observed.append(event["event"])
+            if event["event"] == "awaiting_user":
+                entered.set()
+                await persisted.wait()
+
+        with self.command(script), patch.dict("easy_publish.runtime.OPERATION_TIMEOUTS", {"publish": 1}):
+            task = asyncio.create_task(self.runtime.run("publish", self.payload, on_event, "manual-ack"))
+            await asyncio.wait_for(entered.wait(), 3)
+            self.assertFalse(self.marker.exists(), "manual handoff must wait for durable parent acknowledgement")
+            persisted.set()
+            result = await asyncio.wait_for(task, 4)
+        self.assertEqual(result["status"], "submitted")
+        self.assertEqual(observed, ["submitting", "awaiting_user", "awaiting_user"])
+        self.assertTrue(self.marker.exists())
+        self.assertEqual(list((self.root / "work").iterdir()), [])
+
+    async def test_manual_handoff_requires_fence_browser_platform_and_publish_operation(self):
+        script = """
+import json, pathlib, sys
+request = json.loads(sys.stdin.readline())
+if request['payload']['options']['fenced']:
+    print(json.dumps({'event':'submitting'}), flush=True)
+    assert json.loads(sys.stdin.readline()) == {'ack':'submitting'}
+print(json.dumps({'event':'awaiting_user'}), flush=True)
+assert json.loads(sys.stdin.readline()) == {'ack':'awaiting_user'}
+pathlib.Path(request['payload']['options']['marker']).write_text('unexpected handoff')
+print(json.dumps({'event':'result','status':'published'}), flush=True)
+"""
+        for operation, platform, fenced in [("publish", "zhihu", False), ("publish", "wechat", True), ("publish", "bilibili", True), ("login", "zhihu", True)]:
+            with self.subTest(operation=operation, platform=platform, fenced=fenced):
+                payload = {**self.payload, "platform_id": platform, "options": {**self.payload["options"], "fenced": fenced}}
+                observed = []
+                async def on_event(event):
+                    observed.append(event["event"])
+                with self.command(script):
+                    result = await self.runtime.run(operation, payload, on_event, "invalid-manual")
+                self.assertEqual(result["status"], "unknown" if fenced else "failed")
+                self.assertNotIn("awaiting_user", observed)
+                self.assertFalse(self.marker.exists())
+
+    async def test_manual_wait_can_be_cancelled_and_result_exit_is_still_bounded(self):
+        self.payload["platform_id"] = "zhihu"
+        script = """
+import json, sys, time
+request = json.loads(sys.stdin.readline())
+for event in ('submitting', 'awaiting_user'):
+    print(json.dumps({'event':event}), flush=True)
+    assert json.loads(sys.stdin.readline()) == {'ack':event}
+if request['payload']['options']['return_result']:
+    print(json.dumps({'event':'result', 'status':'submitted', 'message':'fixture receipt'}), flush=True)
+time.sleep(60)
+"""
+        for return_result in (False, True):
+            with self.subTest(return_result=return_result):
+                entered = asyncio.Event()
+                async def on_event(event):
+                    if event["event"] == "awaiting_user":
+                        entered.set()
+                payload = {**self.payload, "options": {**self.payload["options"], "return_result": return_result}}
+                with self.command(script), patch("easy_publish.runtime.WORKER_EXIT_SECONDS", 0.15):
+                    task = asyncio.create_task(self.runtime.run("publish", payload, on_event, "manual-stop"))
+                    await asyncio.wait_for(entered.wait(), 3)
+                    if not return_result:
+                        await self.runtime.cancel("manual-stop")
+                    result = await asyncio.wait_for(task, 3)
+                self.assertEqual(result["status"], "unknown")
+                self.assertFalse(self.runtime._jobs)
+                self.assertEqual(list((self.root / "work").iterdir()), [])
+
     async def test_failed_parent_commit_never_acknowledges_mutation(self):
         async def on_event(event):
             raise OSError("fixture database unavailable")

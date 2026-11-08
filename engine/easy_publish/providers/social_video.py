@@ -1,4 +1,4 @@
-"""Bounded, account-isolated video publishing through the platform's browser UI.
+"""Account-isolated video preparation and supervised manual browser publication.
 
 Selectors adapted from dreammis/social-auto-upload, commit
 3847fff01f5434a8a32829833163cd6723cabc59 (MIT, Copyright (c) 2023 dreammis).
@@ -975,48 +975,95 @@ async def _confirm_receipt(page, platform: str, payload: PublishPayload) -> Prov
     return ProviderResult(status, "平台已显示本次操作成功通知；审核与公开状态请在平台查看", url=page.url.split("?")[0])
 
 
-async def _submit_once(page, button, platform: str, payload: PublishPayload, ctx: ProviderContext) -> ProviderResult:
+async def _manual_success_notice(page, platform: str, payload: PublishPayload) -> bool:
     if platform == "xiaohongshu":
-        button = await _xhs_wait_submit_button(page, ctx)
-    elif platform == "channels":
-        prepared = button
+        return await _visible(page.get_by_text(re.compile(r"^(?:发布|提交)成功[！!。]?$")))
+    return await _success_notice_present(page, platform, payload)
+
+
+async def _manual_receipt(page, platform: str, payload: PublishPayload) -> ProviderResult | None:
+    """Observe a platform success page; never operate a publishing control."""
+    parsed = urlsplit(page.url)
+    if (parsed.scheme != "https" or parsed.hostname != SITES[platform].host
+            or parsed.port not in {None, 443} or parsed.username or parsed.password):
+        return None
+    expected = {"xiaohongshu": "/publish/success", "douyin": "/creator-micro/content/manage",
+                "channels": "/platform/post/list"}[platform]
+    if parsed.path.rstrip("/") != expected:
+        return None
+    if not await _manual_success_notice(page, platform, payload):
+        return None
+    if platform == "xiaohongshu":
+        return ProviderResult("submitted", "小红书已显示手动提交成功，作品仍可能需要审核", url="https://creator.xiaohongshu.com/manage/notes")
+    return ProviderResult("submitted", "平台已显示本次手动提交成功通知；审核与公开状态请在平台查看", url=page.url.split("?")[0])
+
+
+async def _wait_for_manual_publish(page, platform: str, payload: PublishPayload, ctx: ProviderContext,
+                                   message: str | None = None) -> ProviderResult:
+    # No submit-selector/readiness dependency: users can complete account-specific
+    # requirements and every confirmation in the real platform UI themselves.
+    # The supervising host suspends its automatic timeout after this durable event.
+    # A success notice already present at handoff cannot confirm a later user
+    # action. Require a clear page before accepting a newly visible receipt.
+    notice_was_clear = False
+    if not page.is_closed():
         try:
-            async with asyncio.timeout(60):
-                while True:
-                    frame = await _channels_wait_upload(page, payload, ctx, seconds=60)
-                    if payload.cover_path:
-                        try:
-                            cover_preserved = frame is prepared.frame and prepared.document is not None and await prepared.document.evaluate("el => el.isConnected")
-                        except Exception:
-                            cover_preserved = False
-                        if not cover_preserved:
-                            raise VideoStageError("视频号设置封面后编辑器已刷新，无法确认封面保留；尚未点击发表，请先核对平台草稿")
-                    name = "保存草稿" if payload.mode == "draft" else "发表"
-                    button = frame.get_by_role("button", name=name, exact=True).first
-                    try:
-                        classes = await button.get_attribute("class", timeout=1_000) or ""
-                        if await button.is_visible() and await button.is_enabled() and "weui-desktop-btn_disabled" not in classes:
-                            break
-                    except Exception:
-                        pass  # Reacquire if the iframe changed before the click.
-                    await asyncio.sleep(1)
-        except TimeoutError:
-            raise VideoStageError("视频号提交控件尚未就绪或编辑器已刷新；尚未点击发表，请先核对平台草稿及页面提示") from None
-    else:
-        await _wait_enabled(button, page)
-    ctx.progress("正在提交一次，等待平台确认")
+            notice_was_clear = not await _manual_success_notice(page, platform, payload)
+        except Exception:
+            pass
+    ctx.awaiting_user(message or f"{SITES[platform].label}视频已上传并填写，请在已打开的网页中核对内容，手动点击发布并完成确认；请保持应用打开")
+    while not page.is_closed():
+        try:
+            if not notice_was_clear:
+                notice_was_clear = not await _manual_success_notice(page, platform, payload)
+            if notice_was_clear:
+                receipt = await _manual_receipt(page, platform, payload)
+                if receipt is not None:
+                    return receipt
+        except Exception:
+            # Transient navigation, validation, login and editor changes belong
+            # to the user's interaction; never close the window on a read error.
+            pass
+        await asyncio.sleep(0.25)
+    return ProviderResult("unknown", "发布窗口已关闭，尚未取得本次手动发布的明确回执；请先到平台核对草稿和作品", url=SITES[platform].url)
+
+
+async def _submit_once(page, button, platform: str, payload: PublishPayload, ctx: ProviderContext) -> ProviderResult:
+    if payload.mode == "publish":
+        return await _wait_for_manual_publish(page, platform, payload, ctx)
+    # Only the explicitly requested Channels draft action remains automated.
+    if platform != "channels" or payload.mode != "draft":
+        return ProviderResult("needs_attention", "此平台不支持自动保存草稿")
+    prepared = button
     try:
-        if platform != "xiaohongshu" and await _success_notice_present(page, platform, payload):
-            return ProviderResult("unknown", "页面已有成功提示，无法区分本次回执；尚未点击发布，请先核对平台草稿", url=SITES[platform].url)
-        # A timeout can occur after the click reached the server: never retry.
+        async with asyncio.timeout(60):
+            while True:
+                frame = await _channels_wait_upload(page, payload, ctx, seconds=60)
+                if payload.cover_path:
+                    try:
+                        cover_preserved = frame is prepared.frame and prepared.document is not None and await prepared.document.evaluate("el => el.isConnected")
+                    except Exception:
+                        cover_preserved = False
+                    if not cover_preserved:
+                        raise VideoStageError("视频号设置封面后编辑器已刷新，无法确认封面保留；尚未保存草稿，请先核对平台草稿")
+                button = frame.get_by_role("button", name="保存草稿", exact=True).first
+                try:
+                    classes = await button.get_attribute("class", timeout=1_000) or ""
+                    if await button.is_visible() and await button.is_enabled() and "weui-desktop-btn_disabled" not in classes:
+                        break
+                except Exception:
+                    pass
+                await asyncio.sleep(1)
+    except TimeoutError:
+        raise VideoStageError("视频号保存草稿控件尚未就绪或编辑器已刷新；请先核对平台草稿及页面提示") from None
+    ctx.progress("正在保存草稿一次，等待平台确认")
+    try:
+        if await _success_notice_present(page, platform, payload):
+            return ProviderResult("unknown", "页面已有成功提示，无法区分本次回执；尚未保存草稿，请先核对平台草稿", url=SITES[platform].url)
         await button.click(timeout=15_000)
         return await _confirm_receipt(page, platform, payload)
     except Exception:
-        return ProviderResult("unknown", "已尝试提交，尚未获得明确回执；请先在平台核对原作品，勿直接重复发布", url=SITES[platform].url)
-    finally:
-        if platform == "xiaohongshu":
-            with suppress(Exception):
-                await button.dispose()
+        return ProviderResult("unknown", "已尝试保存草稿，尚未获得明确回执；请先在平台核对草稿", url=SITES[platform].url)
 
 
 async def publish(payload: PublishPayload, ctx: ProviderContext) -> ProviderResult:
@@ -1048,8 +1095,18 @@ async def publish(payload: PublishPayload, ctx: ProviderContext) -> ProviderResu
                 return ProviderResult("login_required", "请重新登录并完成平台验证后发布")
             if platform == "douyin":
                 await _douyin_upload_page(page, ctx)
-            async with asyncio.timeout(UPLOAD_SECONDS + LOGIN_SECONDS + CONFIRM_SECONDS):
-                button = await _prepare(page, platform, payload, guarded_ctx)
+            try:
+                async with asyncio.timeout(UPLOAD_SECONDS + LOGIN_SECONDS + CONFIRM_SECONDS):
+                    button = await _prepare(page, platform, payload, guarded_ctx)
+            except Exception as exc:
+                if payload.mode != "publish" or not mutated or page.is_closed():
+                    raise
+                message = str(exc) if isinstance(exc, VideoStageError) else "视频上传或填写未能自动完成"
+                result = await _wait_for_manual_publish(page, platform, payload, guarded_ctx,
+                    message + "；窗口将保持打开，请自行检查上传状态、补全信息并手动点击发布及确认")
+            else:
+                # The user's review/click is deliberately outside preparation's
+                # bounded timeout. Cancellation still tears down our browser.
                 result = await _submit_once(page, button, platform, payload, guarded_ctx)
             # Saving refreshed cookies must not turn a confirmed submission
             # into a retryable failure.

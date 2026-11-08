@@ -1,17 +1,17 @@
-"""大鱼号视频与文章共用的预览、确认发表及提交结果记录。"""
+"""Observe the owner's preview and publication clicks without submitting for them."""
 import json
 from pathlib import Path
 from urllib.parse import parse_qs, parse_qsl, urlencode, urlsplit
 
 from patchright.async_api import Page, expect
+from easy_publish.vendor.social_auto_upload import runtime
 from easy_publish.vendor.social_auto_upload.uploader.dayu_uploader.verification import check_dayu_article_content, wait_dayu_publication
 from easy_publish.vendor.social_auto_upload.uploader.dayu_uploader.schedule import read_dayu_schedule
 
 
-async def submit_dayu_publication(page: Page, result: dict, result_file: Path,
-                                  article_html: str | None = None) -> None:
-    """提交动作各执行一次；每次远端写入前后保存阶段与作品标识，供只读查询。"""
-    result["status"] = "preview_unknown"
+async def _prepare_dayu_preview(page: Page, result: dict, result_file: Path,
+                                article_html: str | None) -> None:
+    result["status"] = "awaiting_user"
     result_file.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
     # 主表单“发表”仅生成预览；用精确按钮名区分后续的“确认发表”。
     save_url = "https://mp.dayu.com/dashboard/save-draft"
@@ -31,10 +31,10 @@ async def submit_dayu_publication(page: Page, result: dict, result_file: Path,
         await page.route(save_url, preserve_article_html)
     try:
         async with page.expect_response(
-            lambda r: urlsplit(r.url).path == "/dashboard/save-draft" and r.request.method == "POST",
-            timeout=45000,
+            lambda r: r.url == "https://mp.dayu.com/dashboard/save-draft" and r.request.method == "POST",
+            timeout=0,
         ) as draft_event:
-            await page.get_by_role("button", name="发表", exact=True).click()
+            runtime.awaiting_user("大鱼号文章已填写，请在网页检查并亲自点击发表，再自行确认发表")
     finally:
         if article_html is not None:
             await page.unroute(save_url, preserve_article_html)
@@ -75,17 +75,21 @@ async def submit_dayu_publication(page: Page, result: dict, result_file: Path,
             result_file.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
         finally:
             await preview.close()
-    # 预览页的最终提交按钮有独立名称，不能复用主表单的“发表”定位。
-    confirm = page.get_by_role("button", name="确认发表", exact=True)
-    await expect(confirm).to_be_visible(timeout=30000)
-    # 响应超时不能再点确认。保留 origin_id 后可查询本次记录，无需重新上传。
-    result["status"] = "submission_unknown"
-    result_file.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+async def submit_dayu_publication(page: Page, result: dict, result_file: Path,
+                                  article_html: str | None = None) -> None:
+    """用户点击主表单发表与最终确认；本地只记录并核对本次作品回执。"""
+    # Install the final observer before handing over the first button: an owner
+    # may confirm while the read-only preview verification is still finishing.
     async with page.expect_response(
-        lambda r: urlsplit(r.url).path == "/dashboard/submit-article" and r.request.method == "POST",
-        timeout=45000,
+        lambda r: r.url == "https://mp.dayu.com/dashboard/submit-article" and r.request.method == "POST",
+        timeout=0,
     ) as submit_event:
-        await confirm.click()
+        await _prepare_dayu_preview(page, result, result_file, article_html)
+        result["status"] = "awaiting_user"
+        result_file.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+        runtime.awaiting_user("大鱼号预览已生成，请检查后亲自点击网页中的确认发表")
     response = await submit_event.value
     if not response.ok:
         raise RuntimeError(f"发表结果未确认: HTTP {response.status}，请核查原作品")

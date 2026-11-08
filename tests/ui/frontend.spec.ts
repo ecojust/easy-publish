@@ -77,14 +77,14 @@ test("preflight blocks errors, dynamic fields persist, enqueue retries reuse req
   await page.evaluate(() => (window as any).__fixture.blockPreflight(true));
   await page.getByRole("button", { name: "检查发布内容" }).click();
   await expect(page.getByText("测试：平台要求添加封面。", { exact: false }).first()).toBeVisible();
-  await expect(page.getByRole("button", { name: "发布到已开启账号" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "创建发布任务" })).toBeDisabled();
   await page.evaluate(() => (window as any).__fixture.blockPreflight(false));
   await page.getByRole("button", { name: "检查发布内容" }).click();
   await expect(page.getByText("发布前检查通过")).toBeVisible();
   await page.evaluate(() => (window as any).__fixture.failBatchOnce());
-  await page.getByRole("button", { name: "发布到已开启账号" }).click();
+  await page.getByRole("button", { name: "创建发布任务" }).click();
   await expect(page.getByRole("alert")).toContainText("网络暂时中断");
-  await page.getByRole("button", { name: "发布到已开启账号" }).click();
+  await page.getByRole("button", { name: "创建发布任务" }).click();
   await expect(page.getByRole("heading", { name: "发布任务", exact: false })).toBeVisible();
   const result = await page.evaluate(() => ({ batches: (window as any).__fixture.state.batches, calls: (window as any).__fixture.calls.filter((call: any) => call.path === "/api/batches"), content: (window as any).__fixture.state.contents[0] }));
   expect(result.batches).toHaveLength(1);
@@ -117,7 +117,7 @@ test("previous platform receipts default off and an explicit repeat creates a fr
   await history("品牌公众号").getByRole("button").click();
   await page.getByLabel("信息来源").selectOption("无需标注");
   await page.getByRole("button", { name: "检查发布内容", exact: true }).click();
-  await page.getByRole("button", { name: "发布到已开启账号", exact: true }).click();
+  await page.getByRole("button", { name: "创建发布任务", exact: true }).click();
   await expect(page.getByRole("heading", { name: "发布任务", exact: false })).toBeVisible();
   await page.evaluate(() => { for (const task of (window as any).__fixture.state.batches[1].tasks) task.status = "submitted"; });
   await page.getByRole("navigation").getByRole("button", { name: "文章", exact: true }).click();
@@ -126,7 +126,7 @@ test("previous platform receipts default off and an explicit repeat creates a fr
   await expect(preview("品牌公众号")).toHaveCount(0);
   await history("品牌公众号").getByRole("button").click();
   await page.getByRole("button", { name: "检查发布内容", exact: true }).click();
-  await page.getByRole("button", { name: "发布到已开启账号", exact: true }).click();
+  await page.getByRole("button", { name: "创建发布任务", exact: true }).click();
   const batches = await page.evaluate(() => (window as any).__fixture.state.batches);
   expect(batches).toHaveLength(3);
   expect(batches[1].contentId).toBe("c-article");
@@ -202,7 +202,7 @@ test("account templates persist and preview without changing the original articl
   await page.getByRole("dialog", { name: "文章最终预览" }).getByRole("button", { name: "关闭", exact: true }).click();
   await page.getByLabel("信息来源").selectOption("无需标注");
   await page.getByRole("button", { name: "检查发布内容", exact: true }).click();
-  await page.getByRole("button", { name: "发布到已开启账号", exact: true }).click();
+  await page.getByRole("button", { name: "创建发布任务", exact: true }).click();
   const result = await page.evaluate(() => ({ state: (window as any).__fixture.state, calls: (window as any).__fixture.calls }));
   expect(result.state.accounts.find((item: any) => item.id === "a-wechat").wechatTemplateId).toBe("artdeco");
   expect(result.state.contents.find((item: any) => item.title === "文章模板工作流").body).toContain("让内容更易读");
@@ -254,7 +254,7 @@ test("video import and platform draft submission target only video accounts", as
   await page.getByRole("textbox", { name: "话题标签" }).press("Enter");
   await expect(page.locator('.video-target-summary:visible').filter({ hasText: "品牌抖音" })).toBeVisible();
   await page.getByRole("button", { name: "检查发布内容", exact: true }).click();
-  await page.getByRole("button", { name: "发布到已开启账号", exact: true }).click();
+  await page.getByRole("button", { name: "创建发布任务", exact: true }).click();
   await expect(page.locator(".batch-title h2")).toHaveText("视频工作流测试");
   const content = await page.evaluate(() => (window as any).__fixture.state.contents.find((entry: any) => entry.title === "视频工作流测试"));
   expect(content.videoAssetId).toBeTruthy();
@@ -421,7 +421,7 @@ test("Kuaishou is a video-only browser account and joins multi-platform publishi
   await page.setViewportSize({ width: 1000, height: 950 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false);
   await page.screenshot({ path: "test-results/kuaishou-video-1000.png", fullPage: true });
-  await page.getByRole("button", { name: "发布到已开启账号", exact: true }).click();
+  await page.getByRole("button", { name: "创建发布任务", exact: true }).click();
   await expect(page.locator(".task-row").filter({ hasText: "快手创作账号" }).getByText("等待处理", { exact: true })).toBeVisible();
   const result = await page.evaluate(() => ({
     account: (window as any).__fixture.state.accounts.find((item: any) => item.label === "快手创作账号"),
@@ -515,10 +515,10 @@ test("Bilibili account settings survive reopening and reach a multi-platform bat
   await page.screenshot({ path: "test-results/bilibili-account-settings-1000.png", fullPage: true });
   await dialog.getByRole("button", { name: "保存视频设置", exact: true }).click();
   await navigate(page, "视频");
-  await expect(page.getByRole("button", { name: "发布到已开启账号", exact: true })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "创建发布任务", exact: true })).toBeDisabled();
   await expect(page.getByLabel("转载来源")).toHaveCount(0);
   await page.getByRole("button", { name: "检查发布内容", exact: true }).click();
-  await page.getByRole("button", { name: "发布到已开启账号", exact: true }).click();
+  await page.getByRole("button", { name: "创建发布任务", exact: true }).click();
   const result = await page.evaluate(() => {
     const fixture = (window as any).__fixture;
     return { content: fixture.state.contents.find((item: any) => item.title === "B 站批量视频测试"), batch: fixture.state.batches[0], snapshot: fixture.snapshots[fixture.state.batches[0].id], preflights: fixture.calls.filter((call: any) => call.path === "/api/preflight") };
@@ -554,8 +554,8 @@ test("Bilibili categories belong to each account and remain available without an
   await expect(page.getByRole("textbox", { name: "视频标题" })).toHaveValue("两个账号不同分区");
   await expect(page.getByLabel("视频分区")).toHaveCount(0);
   await page.getByRole("button", { name: "检查发布内容", exact: true }).click();
-  await expect(page.getByRole("button", { name: "发布到已开启账号", exact: true })).toBeEnabled();
-  await page.getByRole("button", { name: "发布到已开启账号", exact: true }).click();
+  await expect(page.getByRole("button", { name: "创建发布任务", exact: true })).toBeEnabled();
+  await page.getByRole("button", { name: "创建发布任务", exact: true }).click();
   const snapshot = await page.evaluate(() => { const fixture = (window as any).__fixture; return fixture.snapshots[fixture.state.batches[0].id]; });
   expect(snapshot.accountVideoOptions).toEqual({ "a-bilibili": { copyright: "1", tid: "101" }, "a-bilibili-second": { copyright: "1", tid: "103" } });
 });
@@ -564,8 +564,8 @@ test("task receipts stay distinct and only known failures can retry", async ({ p
   await page.goto("/");
   await page.evaluate(() => (window as any).__fixture.seedTasks());
   await page.getByRole("navigation").getByRole("button", { name: "发布任务" }).click();
-  await expect(page.locator(".task-row")).toHaveCount(10);
-  for (const label of ["等待处理", "处理中", "正在提交", "已存平台草稿", "已提交，待平台处理", "已发布", "需要处理", "失败", "已取消", "结果待确认"]) await expect(page.locator(".task-row .status-badge").getByText(label, { exact: true })).toBeVisible();
+  await expect(page.locator(".task-row")).toHaveCount(11);
+  for (const label of ["等待处理", "处理中", "正在提交", "等待手动发布", "已存平台草稿", "已提交，待平台处理", "已发布", "需要处理", "失败", "已取消", "结果待确认"]) await expect(page.locator(".task-row .status-badge").getByText(label, { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "重试", exact: true })).toHaveCount(2);
   await page.locator(".task-row").filter({ hasText: "测试 failed" }).getByRole("button", { name: "重试" }).click();
   await expect(page.locator(".task-row").filter({ hasText: "测试 failed" }).getByText("等待处理", { exact: true })).toBeVisible();
@@ -605,7 +605,7 @@ test("first launch with no accounts or drafts can create the first real local dr
   await page.goto("/");
   await expect(page.getByRole("textbox", { name: "文章标题" })).toHaveValue("");
   await expect(page.getByRole("region", { name: "文章发布设置", exact: true }).getByText("暂无本次发布账号")).toBeVisible();
-  await expect(page.getByRole("button", { name: "发布到已开启账号" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "创建发布任务" })).toBeDisabled();
   await page.screenshot({ path: "test-results/first-launch-empty.png", fullPage: true });
   await page.getByRole("button", { name: "保存", exact: true }).click();
   await expect(page.getByRole("alert")).toContainText("请先填写文章标题");
